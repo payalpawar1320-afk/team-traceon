@@ -22,8 +22,16 @@ import type {
 
 
 
+export const API_BASE =
+  (import.meta.env.VITE_API_URL as string | undefined) ||
+  (import.meta.env.PROD ? 'https://team-traceon.onrender.com' : '');
+
+export function api(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
 export async function fetchHealth(): Promise<HealthResponse> {
-  const response = await fetch('/api/health');
+  const response = await fetch(api('/api/health'));
   if (!response.ok) {
     try {
       const errorData = await response.json();
@@ -36,7 +44,7 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 export async function fetchCaseStats(): Promise<CaseStats> {
-  const response = await fetch('/api/cases/stats');
+  const response = await fetch(api('/api/cases/stats'));
   if (!response.ok) {
     throw new Error(`Failed to load case statistics: HTTP ${response.status}`);
   }
@@ -53,7 +61,7 @@ export async function fetchCases(search?: string, status?: string): Promise<Case
   }
 
   const query = params.toString();
-  const url = query ? `/api/cases?${query}` : '/api/cases';
+  const url = query ? api(`/api/cases?${query}`) : api('/api/cases');
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch cases: HTTP ${response.status}`);
@@ -62,7 +70,7 @@ export async function fetchCases(search?: string, status?: string): Promise<Case
 }
 
 export async function fetchCaseById(identifier: string | number): Promise<CaseDetail> {
-  const response = await fetch(`/api/cases/${identifier}`);
+  const response = await fetch(api(`/api/cases/${identifier}`));
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     throw new Error(errorBody.detail || `Case not found (HTTP ${response.status})`);
@@ -71,7 +79,7 @@ export async function fetchCaseById(identifier: string | number): Promise<CaseDe
 }
 
 export async function createCase(payload: CaseCreatePayload): Promise<CaseSummary> {
-  const response = await fetch('/api/cases', {
+  const response = await fetch(api('/api/cases'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -94,7 +102,7 @@ export async function updateCase(
   caseId: number,
   payload: CaseUpdatePayload
 ): Promise<CaseSummary> {
-  const response = await fetch(`/api/cases/${caseId}`, {
+  const response = await fetch(api(`/api/cases/${caseId}`), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -122,7 +130,7 @@ export async function uploadEvidence(
     formData.append('investigator_name', investigatorName.trim());
   }
 
-  const response = await fetch(`/api/cases/${caseId}/evidence`, {
+  const response = await fetch(api(`/api/cases/${caseId}/evidence`), {
     method: 'POST',
     body: formData,
   });
@@ -135,7 +143,7 @@ export async function uploadEvidence(
 }
 
 export async function fetchCaseEvidence(caseId: number): Promise<EvidenceItem[]> {
-  const response = await fetch(`/api/cases/${caseId}/evidence`);
+  const response = await fetch(api(`/api/cases/${caseId}/evidence`));
   if (!response.ok) {
     throw new Error(`Failed to load case evidence items: HTTP ${response.status}`);
   }
@@ -159,7 +167,7 @@ export async function fetchAllEvidence(params?: {
   }
 
   const queryString = q.toString();
-  const url = queryString ? `/api/evidence?${queryString}` : '/api/evidence';
+  const url = queryString ? api(`/api/evidence?${queryString}`) : api('/api/evidence');
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to load evidence directory: HTTP ${response.status}`);
@@ -168,7 +176,7 @@ export async function fetchAllEvidence(params?: {
 }
 
 export async function fetchEvidenceById(evidenceId: number): Promise<EvidenceDetail> {
-  const response = await fetch(`/api/evidence/${evidenceId}`);
+  const response = await fetch(api(`/api/evidence/${evidenceId}`));
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     throw new Error(errorBody.detail || `Evidence item not found: HTTP ${response.status}`);
@@ -177,7 +185,7 @@ export async function fetchEvidenceById(evidenceId: number): Promise<EvidenceDet
 }
 
 export function getEvidenceDownloadUrl(evidenceId: number): string {
-  return `/api/evidence/${evidenceId}/download`;
+  return api(`/api/evidence/${evidenceId}/download`);
 }
 
 // --- SHA-256 Integrity Verification APIs ---
@@ -187,7 +195,7 @@ export async function verifyEvidenceIntegrity(
   notes?: string
 ): Promise<IntegrityVerifyResult> {
   const query = notes ? `?notes=${encodeURIComponent(notes)}` : '';
-  const response = await fetch(`/api/evidence/${evidenceId}/verify${query}`, {
+  const response = await fetch(api(`/api/evidence/${evidenceId}/verify${query}`), {
     method: 'POST',
   });
 
@@ -199,7 +207,7 @@ export async function verifyEvidenceIntegrity(
 }
 
 export async function verifyAllCaseEvidence(caseId: number): Promise<BatchVerifyResponse> {
-  const response = await fetch(`/api/cases/${caseId}/verify-all`, {
+  const response = await fetch(api(`/api/cases/${caseId}/verify-all`), {
     method: 'POST',
   });
 
@@ -221,7 +229,7 @@ export async function runImageAnalysis(
   if (options?.scale) params.set('scale', options.scale.toString());
 
   const q = params.toString() ? `?${params.toString()}` : '';
-  const response = await fetch(`/api/evidence/${evidenceId}/analyze/image${q}`, {
+  const response = await fetch(api(`/api/evidence/${evidenceId}/analyze/image${q}`), {
     method: 'POST',
   });
 
@@ -235,7 +243,7 @@ export async function runImageAnalysis(
 export async function fetchEvidenceAnalyses(
   evidenceId: number
 ): Promise<AnyForensicAnalysisResponse[]> {
-  const response = await fetch(`/api/evidence/${evidenceId}/analysis`);
+  const response = await fetch(api(`/api/evidence/${evidenceId}/analysis`));
   if (!response.ok) {
     throw new Error(`Failed to load evidence analysis history: HTTP ${response.status}`);
   }
@@ -252,7 +260,7 @@ export async function runVideoAnalysis(
   }
 
   const q = params.toString() ? `?${params.toString()}` : '';
-  const response = await fetch(`/api/evidence/${evidenceId}/analyze/video${q}`, {
+  const response = await fetch(api(`/api/evidence/${evidenceId}/analyze/video${q}`), {
     method: 'POST',
   });
 
@@ -273,7 +281,7 @@ export async function runAudioAnalysis(
   }
 
   const q = params.toString() ? `?${params.toString()}` : '';
-  const response = await fetch(`/api/evidence/${evidenceId}/analyze/audio${q}`, {
+  const response = await fetch(api(`/api/evidence/${evidenceId}/analyze/audio${q}`), {
     method: 'POST',
   });
 
@@ -285,14 +293,14 @@ export async function runAudioAnalysis(
 }
 
 export function getDerivedAssetUrl(filename: string): string {
-  return `/api/analysis/derived/${encodeURIComponent(filename)}`;
+  return api(`/api/analysis/derived/${encodeURIComponent(filename)}`);
 }
 
 export async function compareCrossEvidence(
   caseId: number | string,
   payload: CrossEvidenceCompareRequest
 ): Promise<CrossEvidenceComparisonResponse> {
-  const response = await fetch(`/api/cases/${caseId}/compare-evidence`, {
+  const response = await fetch(api(`/api/cases/${caseId}/compare-evidence`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -306,7 +314,7 @@ export async function compareCrossEvidence(
 }
 
 export async function fetchCaseReports(caseId: number | string): Promise<ReportItem[]> {
-  const response = await fetch(`/api/cases/${caseId}/reports`);
+  const response = await fetch(api(`/api/cases/${caseId}/reports`));
   if (!response.ok) {
     throw new Error(`Failed to load case reports: HTTP ${response.status}`);
   }
@@ -317,7 +325,7 @@ export async function generateCaseReport(
   caseId: number | string,
   payload: ReportGeneratePayload
 ): Promise<ReportItem> {
-  const response = await fetch(`/api/cases/${caseId}/reports`, {
+  const response = await fetch(api(`/api/cases/${caseId}/reports`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -331,7 +339,7 @@ export async function generateCaseReport(
 }
 
 export function getReportDownloadUrl(reportId: number): string {
-  return `/api/reports/${reportId}/download`;
+  return api(`/api/reports/${reportId}/download`);
 }
 
 export async function fetchAuditLog(params?: {
@@ -367,7 +375,7 @@ export async function fetchAuditLog(params?: {
   }
 
   const queryStr = q.toString() ? `?${q.toString()}` : '';
-  const response = await fetch(`/api/audit-log${queryStr}`);
+  const response = await fetch(api(`/api/audit-log${queryStr}`));
   if (!response.ok) {
     throw new Error(`Failed to load audit log: HTTP ${response.status}`);
   }
