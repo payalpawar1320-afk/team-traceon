@@ -22,7 +22,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
   return (
     <aside className="sidebar">
       {/* Header with Official TRACEON Logo */}
-      <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '16px 18px', background: '#e2e8f0', borderBottom: '1px solid #cbd5e1' }}>
+      <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '16px 18px' }}>
         <img
           src="/branding/traceon_logo.png"
           alt="TRACEON"
@@ -45,9 +45,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
             </span>
             <span
               style={{
-                background: '#e0f2fe',
-                border: '1px solid #bae6fd',
-                color: '#0284c7',
+                background: 'rgba(56, 110, 109, 0.12)',
+                border: '1px solid rgba(56, 110, 109, 0.4)',
+                color: '#386e6d',
                 fontSize: '9px',
                 fontWeight: 700,
                 letterSpacing: '0.6px',
@@ -172,7 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
       </nav>
 
       {/* Footer */}
-      <div className="sidebar-footer" style={{ padding: '14px 16px', borderTop: '1px solid #cbd5e1', background: '#d5dde6' }}>
+      <div className="sidebar-footer" style={{ padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <strong style={{ color: '#0f172a', fontSize: '11px', letterSpacing: '0.4px' }}>TRACEON Platform</strong>
           <span style={{ fontSize: '9px', background: '#cbd5e1', border: '1px solid #94a3b8', padding: '1px 5px', borderRadius: '3px', color: '#1e293b', fontWeight: 700 }}>v1.2</span>
