@@ -1001,14 +1001,14 @@ table.data-table tr:hover td {
 
 .workflow-step-card:hover {
   background-color: #ffffff;
-  border-color: #3b82f6;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+  border-color: #470447;
+  box-shadow: 0 4px 14px rgba(71, 4, 71, 0.16);
   transform: translateY(-2px);
 }
 
 .workflow-step-card.active-step {
-  border-color: #2563eb;
-  background-color: #eff6ff;
+  border-color: #470447;
+  background-color: rgba(71, 4, 71, 0.04);
 }
 
 .workflow-step-top {
@@ -1022,7 +1022,7 @@ table.data-table tr:hover td {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background-color: #2563eb;
+  background-color: #470447;
   color: #ffffff;
   font-size: 11px;
   font-weight: 700;

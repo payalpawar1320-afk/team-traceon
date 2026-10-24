@@ -147,7 +147,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
         <div className="workflow-header">
           <div>
             <div className="workflow-header-title">
-              <Sparkles size={18} color="#0284c7" />
+              <Sparkles size={18} color="#470447" />
               <span>How It Works: 5-Step Forensic Workflow</span>
             </div>
             <div className="workflow-header-subtitle">
@@ -169,15 +169,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
           >
             <div>
               <div className="workflow-step-top">
-                <span className="workflow-step-number" style={{ backgroundColor: '#0284c7' }}>1</span>
-                <FolderPlus size={18} color="#0284c7" />
+                <span className="workflow-step-number" style={{ backgroundColor: '#470447' }}>1</span>
+                <FolderPlus size={18} color="#470447" />
               </div>
               <div className="workflow-step-title">Register Case</div>
               <div className="workflow-step-desc">
                 Create official case container with FIR number, incident type, and officer ID.
               </div>
             </div>
-            <div className="workflow-step-action" style={{ color: '#0284c7' }}>
+            <div className="workflow-step-action" style={{ color: '#470447' }}>
               <span>Start Step 1</span>
               <ChevronRight size={13} />
             </div>
@@ -191,15 +191,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
           >
             <div>
               <div className="workflow-step-top">
-                <span className="workflow-step-number" style={{ backgroundColor: '#4f46e5' }}>2</span>
-                <Upload size={18} color="#4f46e5" />
+                <span className="workflow-step-number" style={{ backgroundColor: '#470447' }}>2</span>
+                <Upload size={18} color="#470447" />
               </div>
               <div className="workflow-step-title">Ingest Media</div>
               <div className="workflow-step-desc">
                 Upload images, CCTV video, or audio files. Computes baseline SHA-256 hash.
               </div>
             </div>
-            <div className="workflow-step-action" style={{ color: '#4f46e5' }}>
+            <div className="workflow-step-action" style={{ color: '#470447' }}>
               <span>Go to Step 2</span>
               <ChevronRight size={13} />
             </div>
@@ -213,15 +213,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
           >
             <div>
               <div className="workflow-step-top">
-                <span className="workflow-step-number" style={{ backgroundColor: '#059669' }}>3</span>
-                <ShieldCheck size={18} color="#059669" />
+                <span className="workflow-step-number" style={{ backgroundColor: '#470447' }}>3</span>
+                <ShieldCheck size={18} color="#470447" />
               </div>
               <div className="workflow-step-title">Verify Hashes</div>
               <div className="workflow-step-desc">
                 Recalculate SHA-256 byte digests on-demand to prove files were not altered.
               </div>
             </div>
-            <div className="workflow-step-action" style={{ color: '#059669' }}>
+            <div className="workflow-step-action" style={{ color: '#470447' }}>
               <span>Go to Step 3</span>
               <ChevronRight size={13} />
             </div>
@@ -235,15 +235,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
           >
             <div>
               <div className="workflow-step-top">
-                <span className="workflow-step-number" style={{ backgroundColor: '#7c3aed' }}>4</span>
-                <FileSearch size={18} color="#7c3aed" />
+                <span className="workflow-step-number" style={{ backgroundColor: '#470447' }}>4</span>
+                <FileSearch size={18} color="#470447" />
               </div>
               <div className="workflow-step-title">Forensics & ELA</div>
               <div className="workflow-step-desc">
                 Detect Photoshop editing, ELA compression heatmaps, frozen video frames, and waveforms.
               </div>
             </div>
-            <div className="workflow-step-action" style={{ color: '#7c3aed' }}>
+            <div className="workflow-step-action" style={{ color: '#470447' }}>
               <span>Go to Step 4</span>
               <ChevronRight size={13} />
             </div>
@@ -257,15 +257,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
           >
             <div>
               <div className="workflow-step-top">
-                <span className="workflow-step-number" style={{ backgroundColor: '#d97706' }}>5</span>
-                <FileText size={18} color="#d97706" />
+                <span className="workflow-step-number" style={{ backgroundColor: '#470447' }}>5</span>
+                <FileText size={18} color="#470447" />
               </div>
               <div className="workflow-step-title">Court PDF Report</div>
               <div className="workflow-step-desc">
                 Generate official ReportLab PDF with verified SHA-256 digests and audit logs.
               </div>
             </div>
-            <div className="workflow-step-action" style={{ color: '#d97706' }}>
+            <div className="workflow-step-action" style={{ color: '#470447' }}>
               <span>Go to Step 5</span>
               <ChevronRight size={13} />
             </div>
