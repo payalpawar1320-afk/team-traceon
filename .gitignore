@@ -33,20 +33,16 @@ wheels/
 htmlcov/
 
 # Evidence Storage & Databases (Confidential - never commit evidence or local DBs)
-storage/
-storage/evidence/
-storage/derived/
-storage/reports/
-storage/temp/
-backend/storage/
-backend/storage/evidence/
-backend/storage/derived/
-backend/storage/reports/
-backend/storage/temp/
+/storage/
 *.db
 *.sqlite3
 *.log
 *.pdf
+
+# Allow backend mock/demo database and storage for cloud deployment
+!backend/evidenceguard.db
+!backend/storage/**
+!backend/storage/reports/*.pdf
 
 
 # Node & Frontend
