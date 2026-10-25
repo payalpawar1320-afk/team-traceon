@@ -37,6 +37,7 @@ import {
   Volume2,
   Activity,
   FileAudio,
+  Cpu,
 } from 'lucide-react';
 
 
@@ -68,7 +69,7 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
   const [elaQuality, setElaQuality] = useState<number>(92);
   const [elaScale, setElaScale] = useState<number>(15);
   const [overlayOpacity, setOverlayOpacity] = useState<number>(50);
-  const [imageTab, setImageTab] = useState<'ela' | 'exif' | 'findings'>('ela');
+  const [imageTab, setImageTab] = useState<'ai' | 'ela' | 'exif' | 'findings'>('ai');
   const [exifSearch, setExifSearch] = useState<string>('');
 
   // Video CCTV Controls
@@ -227,6 +228,7 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
   // Image reports
   const meta = imageResult?.metadata_report;
   const ela = imageResult?.ela_report;
+  const aiReport = imageResult?.ai_detection_report;
   const elaImageUrl = ela?.ela_url || '';
 
   // Video reports
@@ -1199,6 +1201,14 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
               {/* Navigation Tabs */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                 <button
+                  className={`btn ${imageTab === 'ai' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '12px', padding: '6px 14px' }}
+                  onClick={() => setImageTab('ai')}
+                >
+                  <Cpu size={13} />
+                  <span>AI vs Real Media Classifier</span>
+                </button>
+                <button
                   className={`btn ${imageTab === 'ela' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ fontSize: '12px', padding: '6px 14px' }}
                   onClick={() => setImageTab('ela')}
@@ -1220,9 +1230,118 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
                   onClick={() => setImageTab('findings')}
                 >
                   <FileSearch size={13} />
-                  <span>Explainable Findings ({meta.findings.length + (ela?.findings.length || 0)})</span>
+                  <span>Explainable Findings ({meta.findings.length + (ela?.findings.length || 0) + (aiReport?.findings.length || 0)})</span>
                 </button>
               </div>
+
+              {/* TAB 0: AI VS REAL CLASSIFIER */}
+              {imageTab === 'ai' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px' }}>
+                  {aiReport ? (
+                    <>
+                      {/* Top Classification Banner */}
+                      <div
+                        className="card"
+                        style={{
+                          padding: '20px',
+                          borderLeftWidth: '5px',
+                          borderLeftColor: aiReport.is_ai_generated ? '#dc2626' : '#16a34a',
+                          background: aiReport.is_ai_generated ? '#fef2f2' : '#f0fdf4',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                              <span
+                                className={`badge ${aiReport.is_ai_generated ? 'badge-danger' : 'badge-success'}`}
+                                style={{ fontSize: '12px', padding: '4px 10px', fontWeight: 700 }}
+                              >
+                                {aiReport.is_ai_generated ? 'AI-GENERATED SYNTHETIC MEDIA' : 'AUTHENTIC OPTICAL CAMERA CAPTURE'}
+                              </span>
+                              <span style={{ fontSize: '12px', color: '#64748b' }}>
+                                Model: <strong>{aiReport.model_name}</strong>
+                              </span>
+                            </div>
+                            <h3 style={{ fontSize: '16px', fontWeight: 700, margin: '4px 0', color: aiReport.is_ai_generated ? '#991b1b' : '#166534' }}>
+                              {aiReport.prediction}
+                            </h3>
+                            <p style={{ fontSize: '13px', color: '#334155', margin: '4px 0 0', maxWidth: '700px' }}>
+                              {aiReport.is_ai_generated
+                                ? `Deep neural representation analysis indicates high structural probability (${aiReport.probability_ai_pct}%) of generative diffusion or synthetic generation.`
+                                : `Visual structures, spatial coherence, and frequency patterns align with physical camera sensor output (${aiReport.probability_real_pct}% probability).`}
+                            </p>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '28px', fontWeight: 800, color: aiReport.is_ai_generated ? '#dc2626' : '#16a34a' }}>
+                              {aiReport.is_ai_generated ? `${aiReport.probability_ai_pct}%` : `${aiReport.probability_real_pct}%`}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              Confidence Rating
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Probability Split Bar */}
+                        <div style={{ marginTop: '16px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>
+                            <span style={{ color: '#dc2626' }}>AI Probability: {aiReport.probability_ai_pct}%</span>
+                            <span style={{ color: '#16a34a' }}>Real Camera: {aiReport.probability_real_pct}%</span>
+                          </div>
+                          <div style={{ height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', display: 'flex' }}>
+                            <div style={{ width: `${aiReport.probability_ai_pct}%`, background: '#dc2626' }} />
+                            <div style={{ width: `${aiReport.probability_real_pct}%`, background: '#16a34a' }} />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Diagnostic Breakdown Grid */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+                        <div className="card" style={{ padding: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                            <Cpu size={16} color="#2563eb" />
+                            <span style={{ fontWeight: 600, fontSize: '13px' }}>Neural Architecture</span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                            <div>Model: <strong>{aiReport.model_name}</strong></div>
+                            <div>Weights: <strong>CIFAKE Benchmark (120,000 images)</strong></div>
+                            <div>Raw Output Logit: <span className="mono">{aiReport.raw_logit}</span></div>
+                          </div>
+                        </div>
+
+                        <div className="card" style={{ padding: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                            <Activity size={16} color="#7c3aed" />
+                            <span style={{ fontWeight: 600, fontSize: '13px' }}>2D-FFT Frequency Analysis</span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                            <div>Spectral Grid: <strong>{aiReport.fft_anomaly_detected ? 'Deconvolution Grid Anomaly' : 'Clean Continuous Spectrum'}</strong></div>
+                            <div>High-to-Center Ratio: <span className="mono">{aiReport.fft_outer_center_ratio}</span></div>
+                            <div>Signature: <strong>{aiReport.fft_anomaly_detected ? 'Diffusion Upsampling Artifacts' : 'Natural Optical Attenuation'}</strong></div>
+                          </div>
+                        </div>
+
+                        <div className="card" style={{ padding: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                            <Camera size={16} color="#059669" />
+                            <span style={{ fontWeight: 600, fontSize: '13px' }}>Hardware Sensor Profile</span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                            <div>EXIF Sensor Tag: <strong>{meta.camera_make ? `${meta.camera_make} ${meta.camera_model || ''}` : 'No Camera Tag'}</strong></div>
+                            <div>Software Signature: <strong>{meta.software || 'None Detected'}</strong></div>
+                            <div>Provenance: <strong>{meta.has_exif ? 'Embedded Optical EXIF' : 'Stripped / Synthetic'}</strong></div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="card" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <Cpu size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                      <p style={{ margin: 0 }}>Click "Run Forensic Examination" above to execute the AI vs Real classifier on this evidence item.</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* TAB 1: ELA */}
               {imageTab === 'ela' && (

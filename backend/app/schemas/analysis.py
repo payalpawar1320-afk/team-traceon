@@ -57,6 +57,7 @@ class ImageForensicAnalysisResponse(BaseModel):
     status: str
     metadata_report: ImageMetadataReport
     ela_report: ELAReport
+    ai_detection_report: Optional[Dict[str, Any]] = None
     total_indicators: int
     limitations: str
     created_at: datetime

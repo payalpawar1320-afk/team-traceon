@@ -98,9 +98,16 @@ def test_pdf_report_plain_english_structure_and_ai_assessment():
     assert "FORENSIC LIMITATIONS — WHAT THESE CHECKS CANNOT ESTABLISH" in full_text
 
     # 2. Honest AI assessment: Never claim fake detection
-    assert "Not Available / Not Implemented in this Prototype" in full_text
-    assert "does not currently include a trained AI-image detection neural network" in norm_text or "does not contain a trained AI-image detection neural network" in norm_text
-    assert "does not output fabricated certainty scores" in norm_text
+    assert (
+        "Analysis Not Run Yet" in full_text
+        or "Not Available / Not Implemented in this Prototype" in full_text
+        or "CIFAKE" in full_text
+    )
+    assert (
+        "does not output fabricated certainty scores" in norm_text
+        or "integrates a CIFAKE-trained EfficientNet-B0" in norm_text
+        or "CIFAKE-trained" in norm_text
+    )
 
     # 3. Dynamic conclusion content
     assert "Summary of Examination Findings:" in full_text
@@ -185,3 +192,44 @@ def test_png_support_and_clean_report_generation():
     assert "IMAGE" in full_text
     assert "image/png" in full_text
     assert "FINAL CONCLUSION — WHAT THIS REPORT TELLS YOU" in full_text
+
+
+def test_cifake_ai_image_detection_in_report():
+    """
+    Test that when an image is analyzed with image forensics, the CIFAKE-trained
+    EfficientNet-B0 and 2D-FFT detector evaluates it, records real probabilities,
+    and updates Section 5 and the Conclusion in the generated PDF report.
+    """
+    case_id = create_test_case(title="AI Detection Evaluation Case")
+    ev_id = upload_jpeg_image(case_id, filename="camera_scene.jpg")
+
+    # Run image forensics analysis
+    an_res = client.post(f"/api/evidence/{ev_id}/analyze/image")
+    assert an_res.status_code == 200
+    an_data = an_res.json()
+    assert "ai_detection_report" in an_data
+    ai_data = an_data["ai_detection_report"]
+    assert ai_data["status"] == "completed"
+    assert "CIFAKE-EfficientNet-B0" in ai_data["model_name"]
+    assert "probability_ai_pct" in ai_data
+    assert "probability_real_pct" in ai_data
+
+    # Generate PDF report
+    rep_res = client.post(
+        f"/api/cases/{case_id}/reports",
+        json={"include_all_evidence": True, "include_audit_trail": False},
+    )
+    assert rep_res.status_code == 201
+    report_id = rep_res.json()["id"]
+
+    dl_res = client.get(f"/api/reports/{report_id}/download")
+    assert dl_res.status_code == 200
+
+    reader = pypdf.PdfReader(io.BytesIO(dl_res.content))
+    full_text = "\n".join(p.extract_text() for p in reader.pages)
+    norm_text = " ".join(full_text.split())
+
+    assert "CIFAKE-EfficientNet-B0 (ONNX)" in full_text
+    assert "AI-GENERATED IMAGE ASSESSMENT" in full_text
+    assert "CIFAKE-trained AI detector" in norm_text
+

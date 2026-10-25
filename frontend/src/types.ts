@@ -146,6 +146,24 @@ export interface ELAReport {
   limitations: string;
 }
 
+export interface AIDetectionReport {
+  status: string;
+  model_name: string;
+  model_version: string;
+  prediction: string;
+  is_ai_generated: boolean;
+  confidence_score: number;
+  probability_ai_pct: number;
+  probability_real_pct: number;
+  raw_logit: number;
+  fft_anomaly_detected: boolean;
+  fft_outer_center_ratio: number;
+  indicator_detected: boolean;
+  verdict: string;
+  findings: ForensicFinding[];
+  limitations: string;
+}
+
 export interface ImageForensicAnalysisResponse {
   analysis_id: number;
   evidence_id: number;
@@ -154,6 +172,7 @@ export interface ImageForensicAnalysisResponse {
   status: string;
   metadata_report: ImageMetadataReport;
   ela_report: ELAReport;
+  ai_detection_report?: AIDetectionReport | null;
   total_indicators: number;
   limitations: string;
   created_at: string;

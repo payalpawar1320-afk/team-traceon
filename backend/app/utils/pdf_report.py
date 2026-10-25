@@ -287,10 +287,30 @@ def _generate_dynamic_final_conclusion(
 
     # 4 & 5. AI-image detector status
     if has_image_evidence:
-        ai_clause = (
-            "An automated AI-image detector was not run because this platform prototype currently performs "
-            "forensic integrity and compression analysis, but does not contain a trained AI-generated image model."
-        )
+        ai_ran = False
+        ai_is_synthetic = False
+        ai_prob = 0.0
+        for an in deduplicated_analyses:
+            if an.analysis_type == "image_forensics" and an.findings_json:
+                try:
+                    pj = json.loads(an.findings_json)
+                    if "ai_detection_report" in pj and pj["ai_detection_report"].get("status") == "completed":
+                        ai_ran = True
+                        ai_is_synthetic = pj["ai_detection_report"].get("is_ai_generated", False)
+                        ai_prob = pj["ai_detection_report"].get("probability_ai_pct", 0.0)
+                        break
+                except Exception:
+                    pass
+
+        if ai_ran:
+            if ai_is_synthetic:
+                ai_clause = f"The CIFAKE-trained AI detector evaluated the image as synthetic media with an AI-generation probability of {ai_prob:.1f}%."
+            else:
+                ai_clause = f"The CIFAKE-trained AI detector found no indicators of generative synthesis, classifying the file as consistent with an authentic camera capture ({100.0 - ai_prob:.1f}% probability)."
+        else:
+            ai_clause = (
+                "An automated AI-image detector was not run on this case because image forensics analysis has not been executed yet."
+            )
     else:
         ai_clause = "AI-image detection was not applicable to the non-image files in this case."
 
@@ -769,11 +789,15 @@ def create_case_forensic_pdf(
                 Paragraph(f"<b>{status_ela}</b>", style_badge_center),
             ])
 
+        status_ai = STATUS_COMPLETED if any(
+            an.analysis_type == "image_forensics" and an.findings_json and "ai_detection_report" in an.findings_json
+            for an in deduplicated_analyses
+        ) else STATUS_NOT_RUN
         methodology_rows.append([
             Paragraph("AI-Generated Image Assessment", style_body_bold),
-            Paragraph("Checks whether an image was created by generative AI tools rather than captured by a camera.", style_body),
-            Paragraph("Not implemented in this prototype", style_body),
-            Paragraph("<b>Not available</b><br/><font size='6' color='#52525b'>Prototype limitation</font>", style_badge_center),
+            Paragraph("Evaluates whether an image was synthesized by generative diffusion AI or captured by an optical camera.", style_body),
+            Paragraph("CIFAKE EfficientNet-B0 (ONNX)", style_body),
+            Paragraph(f"<b>{status_ai}</b>", style_badge_center),
         ])
 
     # Add Video-specific checks ONLY if video evidence is present
@@ -1043,43 +1067,125 @@ def create_case_forensic_pdf(
 
     # SECTION 5: AI-Generated Image Assessment (Phase 4 — Honest Handling, Item A)
     if has_image_evidence:
-        ai_table_data = [
-            [
-                Paragraph("<b>Assessment Parameter</b>", style_body_bold),
-                Paragraph("<b>Current Platform Finding</b>", style_body_bold),
-                Paragraph("<b>Investigative Context & Meaning</b>", style_body_bold),
-            ],
-            [
-                Paragraph("AI-Generated vs Real Status", style_body_bold),
-                Paragraph("<b>Not Available / Not Implemented in this Prototype</b>", style_body_bold),
-                Paragraph("TRACEON prototype does not contain a trained AI-image detection neural network.", style_body),
-            ],
-            [
-                Paragraph("Model Name & Version", style_body),
-                Paragraph("None connected", style_mono),
-                Paragraph("No neural network weights are bundled in this prototype.", style_body_muted),
-            ],
-            [
-                Paragraph("AI / Real Prediction", style_body),
-                Paragraph("Not generated", style_mono),
-                Paragraph("TRACEON refuses to guess or provide an unsupported classification.", style_body_muted),
-            ],
-            [
-                Paragraph("Confidence Score", style_body),
-                Paragraph("Not available (0.00%)", style_mono),
-                Paragraph("Fabricating a fake certainty score is legally inadmissible in court.", style_body_muted),
-            ],
-            [
-                Paragraph("Hardware Provenance Check", style_body),
-                Paragraph("Evaluated via EXIF header", style_body),
-                Paragraph("AI images typically lack physical camera sensor profiles.", style_body_muted),
-            ],
-            [
-                Paragraph("Byte-Level Integrity", style_body),
-                Paragraph("Verified via SHA-256", style_body),
-                Paragraph("Confirms file has not changed since intake.", style_body_muted),
-            ],
-        ]
+        ai_report = None
+        for an in deduplicated_analyses:
+            if an.analysis_type == "image_forensics" and an.findings_json:
+                try:
+                    pj = json.loads(an.findings_json)
+                    if "ai_detection_report" in pj and pj["ai_detection_report"].get("status") == "completed":
+                        ai_report = pj["ai_detection_report"]
+                        break
+                except Exception:
+                    pass
+
+        if ai_report:
+            is_ai = ai_report.get("is_ai_generated", False)
+            status_text = "<b>Indicator found: Likely AI-Generated Synthetic Media</b>" if is_ai else "<b>No indicator found: Consistent with Real Camera Capture</b>"
+            pred_text = ai_report.get("prediction", "Unknown")
+            prob_ai = ai_report.get("probability_ai_pct", 0.0)
+            prob_real = ai_report.get("probability_real_pct", 0.0)
+            conf_str = f"{ai_report.get('confidence_score', 0.0):.1f}%"
+            score_text = f"{prob_ai:.1f}% AI / {prob_real:.1f}% Real"
+            fft_detected = ai_report.get("fft_anomaly_detected", False)
+            fft_ratio = ai_report.get("fft_outer_center_ratio", 0.0)
+            fft_text = f"Grid Anomaly Detected (ratio {fft_ratio:.2f})" if fft_detected else f"Clean Optical Spectrum (ratio {fft_ratio:.2f})"
+
+            ai_table_data = [
+                [
+                    Paragraph("<b>Assessment Parameter</b>", style_body_bold),
+                    Paragraph("<b>Current Platform Finding</b>", style_body_bold),
+                    Paragraph("<b>Investigative Context & Meaning</b>", style_body_bold),
+                ],
+                [
+                    Paragraph("AI-Generated vs Real Status", style_body_bold),
+                    Paragraph(status_text, style_body_bold),
+                    Paragraph("Evaluated via deep visual features and 2D-FFT frequency domain analysis.", style_body),
+                ],
+                [
+                    Paragraph("Model Name & Architecture", style_body),
+                    Paragraph(ai_report.get("model_name", "CIFAKE-EfficientNet-B0 (ONNX)"), style_mono),
+                    Paragraph("EfficientNet-B0 trained on CIFAKE benchmark (60k Real / 60k Synthetic images).", style_body_muted),
+                ],
+                [
+                    Paragraph("AI / Real Prediction", style_body),
+                    Paragraph(f"<b>{pred_text}</b>", style_body_bold),
+                    Paragraph("Neural representation classification of spatial and texture structures.", style_body_muted),
+                ],
+                [
+                    Paragraph("Calibrated Probability", style_body),
+                    Paragraph(score_text, style_mono_bold),
+                    Paragraph(f"Model evaluated {conf_str} confidence on test benchmark distribution.", style_body_muted),
+                ],
+                [
+                    Paragraph("Frequency (2D-FFT) Analysis", style_body),
+                    Paragraph(fft_text, style_body),
+                    Paragraph("Spots high-frequency periodic grid traces typical of diffusion upsampling.", style_body_muted),
+                ],
+                [
+                    Paragraph("Hardware Provenance Check", style_body),
+                    Paragraph("Evaluated via EXIF header", style_body),
+                    Paragraph("AI images typically lack authentic physical camera sensor profiles.", style_body_muted),
+                ],
+                [
+                    Paragraph("Byte-Level Integrity", style_body),
+                    Paragraph("Verified via SHA-256", style_body),
+                    Paragraph("Confirms file has not changed since intake.", style_body_muted),
+                ],
+            ]
+
+            callout_text = (
+                f"<b>Notice on Model Predictions & Forensic Verification:</b><br/>"
+                f"TRACEON evaluated this image using an EfficientNet-B0 neural classifier trained on the CIFAKE dataset "
+                f"coupled with 2D-FFT frequency spectrum analysis. The model evaluated a <b>{prob_ai:.1f}% probability of AI synthesis</b> "
+                f"and <b>{prob_real:.1f}% probability of authentic optical capture</b>. "
+                f"In police investigations, statistical model outputs serve as investigative indicators and should be evaluated alongside "
+                f"intake provenance, chain of custody records, and source device acquisition."
+            )
+        else:
+            ai_table_data = [
+                [
+                    Paragraph("<b>Assessment Parameter</b>", style_body_bold),
+                    Paragraph("<b>Current Platform Finding</b>", style_body_bold),
+                    Paragraph("<b>Investigative Context & Meaning</b>", style_body_bold),
+                ],
+                [
+                    Paragraph("AI-Generated vs Real Status", style_body_bold),
+                    Paragraph("<b>Analysis Not Run Yet</b>", style_body_bold),
+                    Paragraph("Run image forensics examination to execute the AI classifier.", style_body),
+                ],
+                [
+                    Paragraph("Model Name & Version", style_body),
+                    Paragraph("CIFAKE-EfficientNet-B0 (ONNX)", style_mono),
+                    Paragraph("Trained on CIFAKE benchmark dataset (60k Real / 60k Synthetic images).", style_body_muted),
+                ],
+                [
+                    Paragraph("AI / Real Prediction", style_body),
+                    Paragraph("Pending Execution", style_mono),
+                    Paragraph("Execute image analysis to compute model prediction.", style_body_muted),
+                ],
+                [
+                    Paragraph("Confidence Score", style_body),
+                    Paragraph("Pending Execution", style_mono),
+                    Paragraph("Statistical certainty will be calculated upon analysis execution.", style_body_muted),
+                ],
+                [
+                    Paragraph("Hardware Provenance Check", style_body),
+                    Paragraph("Evaluated via EXIF header", style_body),
+                    Paragraph("AI images typically lack physical camera sensor profiles.", style_body_muted),
+                ],
+                [
+                    Paragraph("Byte-Level Integrity", style_body),
+                    Paragraph("Verified via SHA-256", style_body),
+                    Paragraph("Confirms file has not changed since intake.", style_body_muted),
+                ],
+            ]
+
+            callout_text = (
+                "<b>Notice on Model Predictions & Operational Status:</b><br/>"
+                "TRACEON integrates a CIFAKE-trained EfficientNet-B0 deep neural classifier and 2D-FFT frequency analysis. "
+                "Execute the Image Forensics module on the evidence details screen to compute real vs AI predictions for registered images."
+            )
+
         ai_table = Table(ai_table_data, colWidths=[140, 185, 215])
         ai_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), COLOR_LIGHT_GREY),
@@ -1098,15 +1204,7 @@ def create_case_forensic_pdf(
             Spacer(1, 3),
             Table([
                 [
-                    Paragraph(
-                        "<b>Notice on Model Predictions & Proposed AI Addition:</b><br/>"
-                        "TRACEON does not output fabricated certainty scores or unverified classifications. In police investigations, presenting an "
-                        "unsupported AI probability without a tested model is scientifically unsound and legally inadmissible.<br/>"
-                        "<b>Smallest Practical Implementation to Add AI Detection:</b> To enable automated AI-generation detection in future development, "
-                        "(1) Add a frequency-domain (2D-FFT) spectral analysis module to spot deconvolution checkerboard artifacts, or (2) Connect a "
-                        "lightweight pre-trained open-source detector (such as a compact ViT or ResNet model).",
-                        style_callout,
-                    )
+                    Paragraph(callout_text, style_callout)
                 ]
             ], colWidths=[540], style=[
                 ("BACKGROUND", (0, 0), (-1, -1), COLOR_LIGHT_GREY),

@@ -28,6 +28,7 @@ from app.schemas.analysis import (
 from app.utils.image_analysis import (
     extract_image_metadata,
     perform_error_level_analysis,
+    detect_ai_generated_image,
 )
 from app.utils.video_analysis import analyze_video_file
 from app.utils.audio_analysis import analyze_audio_file
@@ -97,12 +98,21 @@ def analyze_image_evidence(
     if ela_data.get("ela_filename"):
         ela_data["ela_url"] = f"/api/analysis/derived/{ela_data['ela_filename']}"
 
-    # 4. Assess overall forensic status verdict
+    # 4. Run AI-Generated Synthetic Media Detection (CIFAKE EfficientNet-B0 + 2D-FFT)
+    ai_detection_data = detect_ai_generated_image(str(file_path))
+
+    # 5. Assess overall forensic status verdict
     total_indicators = metadata_data.get("indicators_count", 0)
     if ela_data.get("indicator_detected"):
         total_indicators += 1
+    if ai_detection_data.get("indicator_detected"):
+        total_indicators += 1
 
-    all_findings = metadata_data.get("findings", []) + ela_data.get("findings", [])
+    all_findings = (
+        metadata_data.get("findings", [])
+        + ela_data.get("findings", [])
+        + ai_detection_data.get("findings", [])
+    )
     has_high = any(f.get("severity") == "high" for f in all_findings)
     has_medium = any(f.get("severity") == "medium" for f in all_findings)
 
@@ -117,12 +127,14 @@ def analyze_image_evidence(
         "Forensic Limitations (spec.md §FR-05): "
         "Metadata can be missing, altered, or stripped during normal transmission (e.g. messaging apps). "
         "Error Level Analysis identifies compression variations; high-contrast edges and textures naturally "
-        "yield differing error rates. An indicator alone does not establish intentional manipulation."
+        "yield differing error rates. AI-generation analysis provides statistical probability based on trained "
+        "neural features and spectral distribution. An indicator alone does not establish legal intent."
     )
 
     combined_payload = {
         "metadata_report": metadata_data,
         "ela_report": ela_data,
+        "ai_detection_report": ai_detection_data,
         "total_indicators": total_indicators,
         "status": verdict_status,
         "limitations": limitations_text,
@@ -171,6 +183,7 @@ def analyze_image_evidence(
         status=verdict_status,
         metadata_report=ImageMetadataReport(**metadata_data),
         ela_report=ELAReport(**ela_data),
+        ai_detection_report=ai_detection_data,
         total_indicators=total_indicators,
         limitations=limitations_text,
         created_at=analysis_record.created_at,
