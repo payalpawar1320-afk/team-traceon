@@ -133,10 +133,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
           onClick={() => onNavigate('reports')}
           type="button"
           style={{ width: '100%', border: 'none', textAlign: 'left' }}
-          title="Step 5: Generate and download court-ready PDF examination report"
+          title="Step 5: Generate and download structured forensic PDF examination report"
         >
           <FileText size={16} />
-          <span>5. Court PDF Reports</span>
+          <span>5. Forensic PDF Reports</span>
         </button>
 
         <div className="nav-section-title">Case Registry & Chain of Custody</div>

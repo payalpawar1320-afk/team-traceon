@@ -151,7 +151,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
               <span>How It Works: 5-Step Forensic Workflow</span>
             </div>
             <div className="workflow-header-subtitle">
-              Follow this step-by-step sequence to process any digital evidence from intake to final court report.
+              Follow this step-by-step sequence to process any digital evidence from intake to final forensic examination report.
             </div>
           </div>
           <span className="badge badge-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -253,16 +253,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ health, onNavigate
           <div
             onClick={() => onNavigate('reports')}
             className="workflow-step-card"
-            title="Click to generate official court-admissible PDF report"
+            title="Click to generate structured forensic PDF examination report"
           >
             <div>
               <div className="workflow-step-top">
                 <span className="workflow-step-number" style={{ backgroundColor: '#470447' }}>5</span>
                 <FileText size={18} color="#470447" />
               </div>
-              <div className="workflow-step-title">Court PDF Report</div>
+              <div className="workflow-step-title">Forensic PDF Report</div>
               <div className="workflow-step-desc">
-                Generate official ReportLab PDF with verified SHA-256 digests and audit logs.
+                Generate structured PDF with verified SHA-256 digests and audit logs.
               </div>
             </div>
             <div className="workflow-step-action" style={{ color: '#470447' }}>

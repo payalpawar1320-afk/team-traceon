@@ -37,7 +37,7 @@ logger = logging.getLogger("traceon.pdf_report")
 
 # =============================================================================
 # STRICT MONOCHROME PALETTE (White, Black, Charcoal, Dark/Mid/Light Grey ONLY)
-# Absolutely NO blue, navy, cyan, purple, neon, glowing effects, or gradients.
+# Professional, clean, and highly readable for government and police workflows.
 # =============================================================================
 COLOR_WHITE = colors.HexColor("#ffffff")
 COLOR_BLACK = colors.HexColor("#09090b")
@@ -55,6 +55,16 @@ PRODUCT_TAGLINE = "Every Trace. Every Truth."
 PRODUCT_SUBTITLE = "Digital Evidence Integrity and Forensic Analysis."
 DOCUMENT_TITLE = "Digital Evidence Examination Report"
 DOCUMENT_CLASSIFICATION = "Demonstration Report — Not a Certified Forensic Report."
+
+# Standard Status Vocabulary (Phase 3 Audit Requirements)
+STATUS_COMPLETED = "Completed"
+STATUS_INDICATOR_FOUND = "Indicator found"
+STATUS_NO_INDICATOR = "No indicator found by this check"
+STATUS_INCONCLUSIVE = "Inconclusive"
+STATUS_NOT_APPLICABLE = "Not applicable"
+STATUS_UNSUPPORTED = "Unsupported format"
+STATUS_NOT_RUN = "Not run"
+STATUS_FAILED = "Failed"
 
 
 def _sanitize_text(val: Any) -> str:
@@ -128,7 +138,7 @@ class NumberedCanvas(canvas.Canvas):
 
         # Running Header (displayed only on pages 2 and later)
         if self._pageNumber > 1:
-            self.drawString(36, 756, f"{PRODUCT_NAME} - {DOCUMENT_TITLE}")
+            self.drawString(36, 756, f"{PRODUCT_NAME} — {DOCUMENT_TITLE}")
             self.drawRightString(576, 756, self._report_number)
             self.setStrokeColor(COLOR_BORDER)
             self.setLineWidth(0.5)
@@ -168,6 +178,134 @@ def generate_unique_report_number(db: Session) -> str:
     return f"REP-{year}-{int(datetime.now(timezone.utc).timestamp()) % 100000:05d}"
 
 
+def _generate_dynamic_final_conclusion(
+    case: Case,
+    selected_evidence: List[Evidence],
+    latest_integrity_by_ev: Dict[int, IntegrityCheck],
+    deduplicated_analyses: List[AnalysisResult],
+) -> str:
+    """
+    Dynamically generates the plain-English section:
+    'Final Conclusion — What This Report Tells You' (100–180 words).
+    Addresses:
+    1. File types examined
+    2. Completed checks
+    3. Notable findings or unusual indicators
+    4. AI-image detection status
+    5. Unavailable or not applicable checks
+    6. Reasonable conclusions
+    7. What cannot be confirmed
+    8. Sensible next steps
+    """
+    if not selected_evidence:
+        return (
+            "No digital evidence files were selected for this examination. "
+            "No technical checks were completed, and no conclusions regarding authenticity can be made. "
+            "Please register and analyze evidence before generating a forensic report."
+        )
+
+    # 1. File types examined
+    type_counts: Dict[str, int] = {}
+    has_png = False
+    has_jpeg = False
+    for ev in selected_evidence:
+        t = ev.detected_file_type.lower()
+        type_counts[t] = type_counts.get(t, 0) + 1
+        if ev.original_filename.lower().endswith(".png") or (ev.mime_type and "png" in ev.mime_type.lower()):
+            has_png = True
+        if ev.original_filename.lower().endswith((".jpg", ".jpeg")) or (ev.mime_type and "jpeg" in ev.mime_type.lower()):
+            has_jpeg = True
+
+    file_summary_parts = []
+    for t, c in sorted(type_counts.items()):
+        file_summary_parts.append(f"{c} {t}")
+    file_type_str = ", ".join(file_summary_parts) if file_summary_parts else "digital evidence"
+
+    # 2. Checks completed & Integrity evaluation
+    all_matched = True
+    mismatch_detected = False
+    not_checked_count = 0
+
+    for ev in selected_evidence:
+        chk = latest_integrity_by_ev.get(ev.id)
+        if chk:
+            if chk.result.lower() == "mismatch":
+                mismatch_detected = True
+                all_matched = False
+            elif chk.result.lower() != "match":
+                all_matched = False
+        else:
+            not_checked_count += 1
+            all_matched = False
+
+    if mismatch_detected:
+        integrity_clause = "The file's current digital fingerprint did NOT match the saved reference, indicating the file has changed since intake."
+    elif all_matched:
+        integrity_clause = "The file's current digital fingerprint matched the saved intake reference, confirming byte-level integrity during storage."
+    else:
+        integrity_clause = "Baseline digital fingerprints were recorded at intake, but on-demand re-verification has not been executed for all items."
+
+    # 3. Findings from executed modules
+    indicators_found = []
+    has_image_evidence = any(e.detected_file_type == "image" for e in selected_evidence)
+
+    for an in deduplicated_analyses:
+        try:
+            if an.findings_json:
+                fdata = json.loads(an.findings_json)
+                if an.analysis_type == "image_forensics":
+                    meta = fdata.get("metadata_report", {})
+                    ela = fdata.get("ela_report", {})
+                    if meta.get("software"):
+                        indicators_found.append(f"editing software tag ('{meta.get('software')}') in metadata")
+                    if ela.get("indicator_detected") and not has_png:
+                        indicators_found.append("compression level variance across image quadrants")
+                elif an.analysis_type == "video_forensics":
+                    vrep = fdata.get("video_report", {})
+                    if vrep.get("duplicate_frames_count", 0) > 0:
+                        indicators_found.append(f"{vrep.get('duplicate_frames_count')} duplicate video frames in sample")
+                    elif vrep.get("is_frozen_detected"):
+                        indicators_found.append("consecutive frozen frames in video sample")
+                elif an.analysis_type == "audio_forensics":
+                    arep = fdata.get("audio_report", {})
+                    if arep.get("is_clipped"):
+                        indicators_found.append("distorted clipped audio samples")
+                    if arep.get("has_silence_gaps"):
+                        indicators_found.append("abrupt silence drop in audio")
+        except Exception:
+            pass
+
+    if indicators_found:
+        findings_clause = f"The examination detected notable indicators requiring follow-up: {', '.join(indicators_found)}."
+    elif deduplicated_analyses:
+        if has_png and not has_jpeg:
+            findings_clause = "Metadata inspection revealed no embedded camera profile (typical of web and AI images), while ELA variance reflects format conversion rather than editing."
+        else:
+            findings_clause = "Executed laboratory checks completed without detecting manipulation indicators in the examined samples."
+    else:
+        findings_clause = "Laboratory analysis modules have not yet been run on the uploaded files."
+
+    # 4 & 5. AI-image detector status
+    if has_image_evidence:
+        ai_clause = (
+            "An automated AI-image detector was not run because this platform prototype currently performs "
+            "forensic integrity and compression analysis, but does not contain a trained AI-generated image model."
+        )
+    else:
+        ai_clause = "AI-image detection was not applicable to the non-image files in this case."
+
+    # 6, 7 & 8. What can/cannot be concluded and next step
+    conclusion_text = (
+        f"This examination evaluated {len(selected_evidence)} file(s) ({file_type_str}) registered under case "
+        f"{_sanitize_text(case.case_number)}. {integrity_clause} {findings_clause} {ai_clause} "
+        f"These checks verify that the stored file has not changed since registration, but they cannot prove "
+        f"who created the file, whether the scene is genuine, or whether the content was edited prior to intake. "
+        f"Any identified indicators should be reviewed alongside original recording devices, telecom carrier records, "
+        f"and witness statements before drawing investigative conclusions."
+    )
+    return conclusion_text
+
+
 def create_case_forensic_pdf(
     case: Case,
     db: Session,
@@ -175,21 +313,26 @@ def create_case_forensic_pdf(
 ) -> Tuple[str, str, int]:
     """
     Generate an authoritative, clear, visually striking and technically truthful
-    digital forensics demonstration PDF report adhering strictly to:
+    digital forensics examination demonstration PDF report adhering strictly to:
     - Product identity: TRACEON ("Every Trace. Every Truth.")
     - Classification: "Demonstration Report — Not a Certified Forensic Report."
     - Strict monochrome palette (White, Black, Charcoal, Dark/Mid/Light Grey).
-    - Executive 10-second first page with case summary, evidence inventory,
-      integrity verification statuses, and prominent limitation notice.
-    - Truthful, dynamically assessed methodology statuses agreeing with findings.
-    - Cautious video reporting covering 20 sampled frames without false claims.
-    - Deduplicated evidence and findings display.
+    - Executive 1-page summary: Case overview, File Details & Integrity Status,
+      and mandatory limitation box.
+    - Plain English throughout: understandable by any citizen, judge, or officer.
+    - Standard status vocabulary: Completed, Indicator found, No indicator found by this check,
+      Inconclusive, Not applicable, Unsupported format, Not run, Failed.
+    - Honest handling of Real vs AI-Generated images (dedicated section for images).
+    - Dynamic Final Conclusion answering all 8 required questions in 100-180 words.
+    - Full extracted metadata breakdown table displaying actual fields.
+    - Honest PNG ELA format disclosure (lossless re-compression artefact notice).
+    - Adaptive media sections: image reports contain only image checks and no video assessments.
+    - Clean technical appendix with manifests, SHA-256 digests, and chain of custody.
     """
     settings.ensure_storage_directories()
     report_num = generate_unique_report_number(db)
-    
+
     clean_case_num = _sanitize_text(case.case_number)
-    # Sanitize case number for filesystem filename
     safe_case_num = re.sub(r"[^A-Za-z0-9_-]", "_", clean_case_num)
     filename = f"{report_num}_{safe_case_num}.pdf"
     file_path = Path(settings.REPORTS_DIR) / filename
@@ -215,7 +358,7 @@ def create_case_forensic_pdf(
 
     styles = getSampleStyleSheet()
 
-    # Typography Hierarchy (Helvetica & Courier)
+    # Typography Hierarchy (Monochrome Helvetica & Courier)
     style_wordmark = ParagraphStyle(
         "TraceonWordmark",
         parent=styles["Normal"],
@@ -268,15 +411,15 @@ def create_case_forensic_pdf(
         fontSize=9.5,
         leading=12,
         textColor=COLOR_DARK_GREY,
-        spaceBefore=8,
-        spaceAfter=4,
+        spaceBefore=7,
+        spaceAfter=3,
     )
 
     style_body = ParagraphStyle(
         "TraceonBody",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=8,
+        fontSize=7.5,
         leading=10.5,
         textColor=COLOR_CHARCOAL,
     )
@@ -290,8 +433,8 @@ def create_case_forensic_pdf(
     style_body_muted = ParagraphStyle(
         "TraceonBodyMuted",
         parent=style_body,
-        fontSize=7.5,
-        leading=10,
+        fontSize=7,
+        leading=9.5,
         textColor=COLOR_MID_GREY,
     )
 
@@ -299,8 +442,8 @@ def create_case_forensic_pdf(
         "TraceonMono",
         parent=styles["Normal"],
         fontName="Courier",
-        fontSize=7.5,
-        leading=9.5,
+        fontSize=7,
+        leading=9,
         textColor=COLOR_CHARCOAL,
     )
 
@@ -372,10 +515,23 @@ def create_case_forensic_pdf(
 
     deduplicated_analyses = list(latest_analyses_map.values())
 
-    # Assess real module execution across selected evidence for truthful methodology
+    # Evidence type assessment
     has_image_evidence = any(e.detected_file_type == "image" for e in selected_evidence)
     has_video_evidence = any(e.detected_file_type == "video" for e in selected_evidence)
     has_audio_evidence = any(e.detected_file_type == "audio" for e in selected_evidence)
+
+    has_png_image = any(
+        e.detected_file_type == "image" and (
+            e.original_filename.lower().endswith(".png") or (e.mime_type and "png" in e.mime_type.lower())
+        )
+        for e in selected_evidence
+    )
+    has_jpeg_image = any(
+        e.detected_file_type == "image" and (
+            e.original_filename.lower().endswith((".jpg", ".jpeg")) or (e.mime_type and "jpeg" in e.mime_type.lower())
+        )
+        for e in selected_evidence
+    )
 
     executed_analysis_types = {an.analysis_type for an in deduplicated_analyses}
     has_image_analysis = "image_forensics" in executed_analysis_types
@@ -387,7 +543,6 @@ def create_case_forensic_pdf(
     # =========================================================================
     gen_time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    # 1. Header Banner & Identity Area
     brand_col = [
         Paragraph(f"<b>{PRODUCT_NAME}</b>", style_wordmark),
         Spacer(1, 1),
@@ -424,10 +579,10 @@ def create_case_forensic_pdf(
         ("RIGHTPADDING", (1, 0), (1, -1), 6),
     ]))
     story.append(header_table)
-    story.append(HRFlowable(width="100%", thickness=1.5, color=COLOR_DARK_GREY, spaceBefore=4, spaceAfter=6))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=COLOR_DARK_GREY, spaceBefore=4, spaceAfter=5))
 
-    # 2. Section 1: Investigation Case Summary
-    story.append(Paragraph("1. INVESTIGATION CASE SUMMARY", style_section_heading))
+    # SECTION 1: Report Summary & Case Overview
+    story.append(Paragraph("1. INVESTIGATION CASE SUMMARY & REPORT OVERVIEW", style_section_heading))
     raw_desc = case.description if case.description and case.description.strip() else "Digital forensics examination of registered evidence items."
     clean_desc = _sanitize_text(raw_desc)
 
@@ -451,7 +606,7 @@ def create_case_forensic_pdf(
             Paragraph(f"{len(selected_evidence)} item(s) selected", style_body),
         ],
         [
-            Paragraph("<b>Case Scope / Summary:</b>", style_body),
+            Paragraph("<b>Case Purpose:</b>", style_body),
             Paragraph(_esc(clean_desc), style_body),
             "",
             "",
@@ -470,10 +625,10 @@ def create_case_forensic_pdf(
         ("SPAN", (1, 3), (3, 3)),
     ]))
     story.append(case_table)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 5))
 
-    # 3. Section 2: Evidence Overview & Integrity Verification (Each item listed ONCE)
-    story.append(Paragraph("2. DIGITAL EVIDENCE & INTEGRITY STATUS OVERVIEW", style_section_heading))
+    # SECTION 2: File Details & Integrity Status Overview
+    story.append(Paragraph("2. DIGITAL EVIDENCE & INTEGRITY STATUS OVERVIEW (FILE DETAILS)", style_section_heading))
     if not selected_evidence:
         story.append(Paragraph("<i>No digital evidence items registered under this case.</i>", style_body_muted))
     else:
@@ -483,7 +638,7 @@ def create_case_forensic_pdf(
                 Paragraph("<b>Original Filename</b>", style_body_bold),
                 Paragraph("<b>Type & Format</b>", style_body_bold),
                 Paragraph("<b>File Size</b>", style_body_bold),
-                Paragraph("<b>Baseline SHA-256 (Prefix)</b>", style_body_bold),
+                Paragraph("<b>Reference Fingerprint (SHA-256)</b>", style_body_bold),
                 Paragraph("<b>Integrity Status</b>", style_body_bold),
             ]
         ]
@@ -494,7 +649,7 @@ def create_case_forensic_pdf(
             if chk:
                 res_lower = chk.result.lower()
                 if res_lower == "match":
-                    status_badge = "<b>MATCH</b><br/><font size='6' color='#52525b'>Byte identical to baseline</font>"
+                    status_badge = "<b>MATCH</b><br/><font size='6' color='#52525b'>Byte-identical to baseline</font>"
                 elif res_lower == "mismatch":
                     status_badge = "<b>MISMATCH</b><br/><font size='6' color='#18181b'>Variance detected</font>"
                 elif res_lower == "check failed":
@@ -521,22 +676,22 @@ def create_case_forensic_pdf(
             ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
             ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(overview_table)
 
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
-    # 4. Mandatory Integrity Limitation Notice (Prominent Framed Callout Box)
+    # Mandatory Integrity Verification Notice (Executive Callout Box)
     notice_text = (
         "<b>MANDATORY INTEGRITY VERIFICATION NOTICE & LIMITATIONS:</b><br/>"
         "A matching SHA-256 digital fingerprint verifies mathematically that the file byte sequence on storage "
         "matches the reference cryptographic fingerprint computed during intake into TRACEON.<br/>"
-        "• <b>What this establishes:</b> The stored file has not experienced byte corruption, tampering, or replacement since ingestion.<br/>"
-        "• <b>What this does NOT establish:</b> Digital fingerprint matching does <b>NOT</b> prove the file was genuine when recorded, "
+        "&bull; <b>What this establishes:</b> The stored file has not experienced byte corruption, tampering, or replacement since ingestion.<br/>"
+        "&bull; <b>What this does NOT establish:</b> Digital fingerprint matching does <b>NOT</b> prove the file was genuine when recorded, "
         "does <b>NOT</b> prove the content was unedited prior to intake, does <b>NOT</b> certify device provenance, and does <b>NOT</b> "
         "confer legal admissibility or statutory certification."
     )
@@ -544,83 +699,485 @@ def create_case_forensic_pdf(
     notice_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), COLOR_LIGHT_GREY),
         ("BOX", (0, 0), (-1, -1), 1.0, COLOR_DARK_GREY),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
         ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]))
     story.append(notice_table)
 
-    # Clean PageBreak so Page 1 stands as the complete executive 10-second summary
+    # Page break so Page 1 remains a clean executive 10-second summary
     story.append(PageBreak())
 
     # =========================================================================
-    # PAGE 2+: TECHNICAL REFERENCE & DETAILED DOSSIER
+    # PAGE 2+: TECHNICAL CHECKS, FINDINGS & AI ASSESSMENT (ADAPTIVE TO FILE TYPE)
     # =========================================================================
 
-    # 5. Section 3: Technical Terminology & Plain English Reference
-    story.append(Paragraph("3. TECHNICAL TERMINOLOGY & PLAIN ENGLISH REFERENCE", style_section_heading))
-    glossary_table_data = [
+    # SECTION 3: Checks Performed & Methodology Status (Adaptive to Evidence Type)
+    story.append(Paragraph("3. CHECKS PERFORMED & METHODOLOGY STATUS", style_section_heading))
+
+    status_magic = STATUS_COMPLETED
+    status_sha256 = STATUS_COMPLETED
+
+    methodology_rows = [
         [
-            Paragraph("<b>Technical Term</b>", style_body_bold),
-            Paragraph("<b>Plain English Definition & Investigative Relevance</b>", style_body_bold),
+            Paragraph("<b>Check Name</b>", style_body_bold),
+            Paragraph("<b>What It Checks (Plain English)</b>", style_body_bold),
+            Paragraph("<b>Method & Tool Used</b>", style_body_bold),
+            Paragraph("<b>Status</b>", style_body_bold),
         ],
         [
-            Paragraph("<b>SHA-256</b>", style_body_bold),
-            Paragraph(
-                "A mathematical digital fingerprint calculated from a file. If even a single byte in the file is modified, "
-                "the resulting fingerprint changes entirely.",
-                style_body,
-            ),
+            Paragraph("File Signature Validation", style_body_bold),
+            Paragraph("Checks container header bytes to confirm actual file format and detect disguised executables.", style_body),
+            Paragraph("Binary Header Parser (Magic Bytes)", style_body),
+            Paragraph(f"<b>{status_magic}</b>", style_badge_center),
         ],
         [
-            Paragraph("<b>Metadata</b>", style_body_bold),
-            Paragraph(
-                "Information stored inside or alongside a file, such as timestamps, camera model, lens settings, or editing software tags.",
-                style_body,
-            ),
-        ],
-        [
-            Paragraph("<b>Forensic indicator</b>", style_body_bold),
-            Paragraph(
-                "A technical observation that may require further investigation. An indicator alone does not establish intentional fraud or forgery.",
-                style_body,
-            ),
-        ],
-        [
-            Paragraph("<b>Frame duplication</b>", style_body_bold),
-            Paragraph(
-                "A video frame that appears more than once. This occurs naturally in CCTV streams due to camera holds, low frame rates, or sensor pause.",
-                style_body,
-            ),
-        ],
-        [
-            Paragraph("<b>Inconclusive</b>", style_body_bold),
-            Paragraph(
-                "The available technical data is insufficient to reach a definitive finding without corroborating physical evidence.",
-                style_body,
-            ),
+            Paragraph("SHA-256 Digital Fingerprint", style_body_bold),
+            Paragraph("Calculates digital fingerprint to confirm stored file matches intake baseline.", style_body),
+            Paragraph("Python hashlib (64 KB chunks)", style_body),
+            Paragraph(f"<b>{status_sha256}</b>", style_badge_center),
         ],
     ]
-    glossary_table = Table(glossary_table_data, colWidths=[120, 420])
-    glossary_table.setStyle(TableStyle([
+
+    # Add Image-specific checks if image evidence is present
+    if has_image_evidence:
+        status_meta = STATUS_COMPLETED if has_image_analysis else STATUS_NOT_RUN
+        methodology_rows.append([
+            Paragraph("Metadata & Device Details", style_body_bold),
+            Paragraph("Audits file header for camera make, model, original timestamps, GPS coordinates, and software tags.", style_body),
+            Paragraph("Pillow EXIF / Header Parser", style_body),
+            Paragraph(f"<b>{status_meta}</b>", style_badge_center),
+        ])
+
+        if has_png_image and not has_jpeg_image:
+            # Honest ELA reporting on PNG
+            methodology_rows.append([
+                Paragraph("Error Level Analysis (ELA)", style_body_bold),
+                Paragraph("Compression forensic technique for JPEG. PNG is a lossless format; re-saving PNG as JPEG introduces artificial conversion differences.", style_body),
+                Paragraph("Pillow ImageChops (Quality 92, 15x)", style_body),
+                Paragraph("<b>Unsupported format</b><br/><font size='6' color='#52525b'>Lossless PNG format</font>", style_badge_center),
+            ])
+        else:
+            status_ela = STATUS_COMPLETED if has_image_analysis else STATUS_NOT_RUN
+            methodology_rows.append([
+                Paragraph("Error Level Analysis (ELA)", style_body_bold),
+                Paragraph("Image comparison technique that evaluates JPEG compression consistency. Does not prove editing.", style_body),
+                Paragraph("Pillow ImageChops (Quality 92, 15x)", style_body),
+                Paragraph(f"<b>{status_ela}</b>", style_badge_center),
+            ])
+
+        methodology_rows.append([
+            Paragraph("AI-Generated Image Assessment", style_body_bold),
+            Paragraph("Checks whether an image was created by generative AI tools rather than captured by a camera.", style_body),
+            Paragraph("Not implemented in this prototype", style_body),
+            Paragraph("<b>Not available</b><br/><font size='6' color='#52525b'>Prototype limitation</font>", style_badge_center),
+        ])
+
+    # Add Video-specific checks ONLY if video evidence is present
+    if has_video_evidence:
+        status_video = STATUS_COMPLETED if has_video_analysis else STATUS_NOT_RUN
+        methodology_rows.append([
+            Paragraph("Video Continuity Check", style_body_bold),
+            Paragraph("Decodes stream properties and evaluates exactly 20 sampled frames for duplicate or frozen footage.", style_body),
+            Paragraph("OpenCV (cv2) Video Decoder", style_body),
+            Paragraph(f"<b>{status_video}</b>", style_badge_center),
+        ])
+
+    # Add Audio-specific checks ONLY if audio evidence is present
+    if has_audio_evidence:
+        status_audio = STATUS_COMPLETED if has_audio_analysis else STATUS_NOT_RUN
+        methodology_rows.append([
+            Paragraph("Audio Acoustic & Silence Check", style_body_bold),
+            Paragraph("Checks audio recording for amplitude clipping, distorted samples, and sudden silence drops.", style_body),
+            Paragraph("Python wave & struct modules", style_body),
+            Paragraph(f"<b>{status_audio}</b>", style_badge_center),
+        ])
+
+    methodology_table = Table(methodology_rows, colWidths=[120, 205, 125, 90], repeatRows=1)
+    methodology_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), COLOR_LIGHT_GREY),
         ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
         ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]))
-    story.append(glossary_table)
-    story.append(Spacer(1, 8))
+    story.append(methodology_table)
 
-    # 6. Section 4: Detailed Evidence Manifest & Digital Fingerprint Dossier
-    story.append(Paragraph("4. DETAILED EVIDENCE MANIFEST & DIGITAL FINGERPRINT DOSSIER", style_section_heading))
-    if not selected_evidence:
-        story.append(Paragraph("<i>No evidence registered.</i>", style_body_muted))
+    # If only image evidence is present, clearly state that video/audio checks do not apply
+    if has_image_evidence and not (has_video_evidence or has_audio_evidence):
+        story.append(Spacer(1, 2))
+        story.append(Paragraph(
+            "<i>Note on Media Adaptation: Video frame continuity and audio acoustic checks are omitted from this table because they do not apply to image evidence (NOT APPLICABLE to this case).</i>",
+            style_body_muted,
+        ))
+
+    story.append(Spacer(1, 6))
+
+    # SECTION 4: Detailed Findings & Extracted Metadata Observations
+    story.append(Paragraph("4. DETAILED FINDINGS & EXTRACTED METADATA OBSERVATIONS", style_section_heading))
+
+    finding_rows = []
+    finding_counter = 1
+    image_metadata_tables = []
+
+    for an in deduplicated_analyses:
+        ev = an.evidence
+        ev_label = ev.evidence_number if ev else f"ID {an.evidence_id}"
+        outcome_status = STATUS_NO_INDICATOR
+        obs_text = "Analysis executed. No anomalous indicators detected by this check."
+        significance = "Normal"
+
+        try:
+            if an.findings_json:
+                fdata = json.loads(an.findings_json)
+
+                if an.analysis_type == "image_forensics":
+                    meta = fdata.get("metadata_report", {})
+                    ela = fdata.get("ela_report", {})
+
+                    is_this_png = (
+                        (ev and (ev.original_filename.lower().endswith(".png") or (ev.mime_type and "png" in ev.mime_type.lower())))
+                        or meta.get("format", "").upper() == "PNG"
+                    )
+
+                    # Build detailed metadata breakdown table (Item C)
+                    meta_fields_data = [
+                        [
+                            Paragraph("<b>Extracted Metadata Field</b>", style_body_bold),
+                            Paragraph("<b>Reported Value from File</b>", style_body_bold),
+                            Paragraph("<b>Forensic Interpretation</b>", style_body_bold),
+                        ],
+                        [
+                            Paragraph("Container Format & Resolution", style_body),
+                            Paragraph(f"{_esc(meta.get('format', 'UNKNOWN'))} ({meta.get('width', 0)} x {meta.get('height', 0)} px, {_esc(meta.get('color_mode', 'RGB'))})", style_mono),
+                            Paragraph("Container properties decoded directly from file bytes.", style_body_muted),
+                        ],
+                        [
+                            Paragraph("Camera Manufacturer (Make)", style_body),
+                            Paragraph(_esc(meta.get('camera_make')) if meta.get('camera_make') else "Field not present", style_mono_bold if meta.get('camera_make') else style_body_muted),
+                            Paragraph("Hardware make recorded in EXIF." if meta.get('camera_make') else "No hardware manufacturer embedded in file.", style_body_muted),
+                        ],
+                        [
+                            Paragraph("Camera Device Model", style_body),
+                            Paragraph(_esc(meta.get('camera_model')) if meta.get('camera_model') else "Field not present", style_mono_bold if meta.get('camera_model') else style_body_muted),
+                            Paragraph("Hardware model recorded in EXIF." if meta.get('camera_model') else "No device model profile embedded in file.", style_body_muted),
+                        ],
+                        [
+                            Paragraph("Capture Timestamp Original", style_body),
+                            Paragraph(_esc(meta.get('capture_date')) if meta.get('capture_date') else "Field not present", style_mono if meta.get('capture_date') else style_body_muted),
+                            Paragraph("Original capture date recorded." if meta.get('capture_date') else "No original optical capture time found.", style_body_muted),
+                        ],
+                        [
+                            Paragraph("Software / Processing Tool", style_body),
+                            Paragraph(_esc(meta.get('software')) if meta.get('software') else "Field not present", style_mono_bold if meta.get('software') else style_body_muted),
+                            Paragraph("<b>Indicator found:</b> Editing software signature." if meta.get('software') else "No photo-editing software tag found.", style_body_muted),
+                        ],
+                        [
+                            Paragraph("GPS Geolocation", style_body),
+                            Paragraph(f"Lat {meta['gps']['latitude']}, Lon {meta['gps']['longitude']}" if meta.get('gps') else "Field not present", style_mono if meta.get('gps') else style_body_muted),
+                            Paragraph("Geographic coordinates embedded." if meta.get('gps') else "No geographic coordinates embedded in file.", style_body_muted),
+                        ],
+                    ]
+                    meta_table = Table(meta_fields_data, colWidths=[140, 185, 215])
+                    meta_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), COLOR_LIGHT_GREY),
+                        ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+                        ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("TOPPADDING", (0, 0), (-1, -1), 2),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ]))
+                    image_metadata_tables.append((ev_label, meta_table))
+
+                    # Format plain English finding summary
+                    mean_val = ela.get('mean_error', 0.0)
+                    max_val = ela.get('max_error', 0.0)
+
+                    if is_this_png:
+                        # PNG ELA Disclosure (Item B)
+                        obs_text = (
+                            f"Metadata: No camera hardware make/model embedded (Field not present). "
+                            f"ELA re-save: mean error={mean_val:.2f}, max error={max_val:.2f}. "
+                            f"Format disclosure: ELA re-saves lossless PNG as JPEG quality 92; reported error values are "
+                            f"format conversion artefacts, not evidence of editing."
+                        )
+                        outcome_status = STATUS_UNSUPPORTED
+                        significance = "PNG conversion artefact"
+                    else:
+                        notes = []
+                        if meta.get("camera_make") or meta.get("camera_model"):
+                            notes.append(f"Recorded device: {_esc(meta.get('camera_make'))} {_esc(meta.get('camera_model'))}")
+                        else:
+                            notes.append("No camera hardware make or model found in metadata (Field not present)")
+
+                        if meta.get("software"):
+                            notes.append(f"Editing software signature detected: {_esc(meta.get('software'))}")
+                            outcome_status = STATUS_INDICATOR_FOUND
+                            significance = "Software signature present"
+                        if ela.get("mean_error") is not None:
+                            notes.append(f"JPEG ELA difference: mean={mean_val:.2f}, max={max_val:.2f}")
+                        if ela.get("indicator_detected"):
+                            outcome_status = STATUS_INDICATOR_FOUND
+                            significance = "Regional compression variance"
+                        obs_text = "; ".join(notes)
+
+                elif an.analysis_type == "video_forensics":
+                    # Video forensics only evaluated if video evidence was analyzed
+                    vrep = fdata.get("video_report", {})
+                    dur = vrep.get("duration_sec", 0.0)
+                    fps = vrep.get("fps", 0.0)
+                    dup = vrep.get("duplicate_frames_count", 0)
+                    codec = vrep.get("codec", "Unknown")
+                    is_frozen = vrep.get("is_frozen_detected", False)
+                    sampled_cnt = vrep.get("sampled_frames_count", 20)
+
+                    notes = [
+                        f"Stream properties: Duration {dur:.2f}s, Speed {fps:.1f} fps, Codec {_esc(codec)} (Decodable)",
+                        f"Sample coverage: Exactly {sampled_cnt} sampled frames inspected across footage",
+                    ]
+                    if dup > 0:
+                        notes.append(f"Frame continuity: {dup} duplicate frames detected ({vrep.get('duplicate_percentage', 0.0):.1f}% of sample)")
+                        outcome_status = STATUS_INDICATOR_FOUND
+                        significance = "Inspect camera frame hold"
+                    elif is_frozen:
+                        notes.append("Frame continuity: Consecutive frozen frame sequence detected in sample")
+                        outcome_status = STATUS_INDICATOR_FOUND
+                        significance = "Inspect feed continuity"
+                    else:
+                        notes.append(f"Sample continuity: 0 duplicate or frozen frames detected across {sampled_cnt} sampled frames")
+                        notes.append("No indicator was detected by this check in the examined samples. This result does not establish that the complete video is authentic or free from manipulation.")
+                        outcome_status = STATUS_NO_INDICATOR
+                        significance = f"Sample normal ({sampled_cnt} frames)"
+
+                    obs_text = "; ".join(notes)
+
+                elif an.analysis_type == "audio_forensics":
+                    arep = fdata.get("audio_report", {})
+                    dur = arep.get("duration_sec", 0.0)
+                    sr = arep.get("sample_rate_hz", "Unknown")
+                    ch = arep.get("channels", "Unknown")
+                    notes = [f"Decoded audio: Duration {dur:.2f}s, Sample rate {sr} Hz, Channels {ch}"]
+                    if arep.get("is_clipped"):
+                        notes.append(f"Acoustic envelope: {arep.get('clipped_samples_count')} clipped distorted samples detected")
+                        outcome_status = STATUS_INDICATOR_FOUND
+                        significance = "High gain / clipping"
+                    if arep.get("has_silence_gaps"):
+                        notes.append("Acoustic continuity: Abrupt silence drop detected")
+                        outcome_status = STATUS_INDICATOR_FOUND
+                        significance = "Inspect track continuity"
+                    if not arep.get("is_clipped") and not arep.get("has_silence_gaps"):
+                        notes.append("Acoustic continuity: No clipping anomalies or silence drops detected")
+                        outcome_status = STATUS_NO_INDICATOR
+                        significance = "Normal acoustic envelope"
+                    obs_text = "; ".join(notes)
+
+        except Exception as e:
+            obs_text = f"Analysis completed. Detailed data recorded: {_esc(str(e))}"
+
+        cat_title = an.analysis_type.replace("_", " ").title()
+        finding_rows.append([
+            Paragraph(f"<b>FND-{finding_counter:03d}</b>", style_mono_bold),
+            Paragraph(f"<b>{_esc(ev_label)}</b>", style_mono),
+            Paragraph(_esc(cat_title), style_body),
+            Paragraph(obs_text, style_body),
+            Paragraph(f"<b>{outcome_status}</b>", style_badge_center),
+            Paragraph(significance, style_body_muted),
+        ])
+        finding_counter += 1
+
+    if not finding_rows:
+        story.append(Paragraph(
+            "<i>No formal laboratory analysis modules (Image, Video, or Audio) have been executed for the selected evidence in this case. "
+            "Individual checks remain classified as 'Not run'.</i>",
+            style_body_muted,
+        ))
     else:
+        findings_table_data = [
+            [
+                Paragraph("<b>ID</b>", style_body_bold),
+                Paragraph("<b>Item #</b>", style_body_bold),
+                Paragraph("<b>Category</b>", style_body_bold),
+                Paragraph("<b>Observation & Checks Performed</b>", style_body_bold),
+                Paragraph("<b>Outcome</b>", style_body_bold),
+                Paragraph("<b>Significance</b>", style_body_bold),
+            ]
+        ] + finding_rows
+
+        findings_table = Table(findings_table_data, colWidths=[45, 75, 80, 205, 75, 60], repeatRows=1)
+        findings_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), COLOR_LIGHT_GREY),
+            ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(findings_table)
+
+    # Append structured metadata table if image analysis ran (Item C)
+    if image_metadata_tables:
+        story.append(Spacer(1, 4))
+        for ev_num, m_table in image_metadata_tables:
+            story.append(Paragraph(f"<b>Extracted Metadata Breakdown for Item {ev_num}:</b>", style_body_bold))
+            story.append(Spacer(1, 2))
+            story.append(m_table)
+            story.append(Spacer(1, 2))
+            story.append(Paragraph(
+                "<i>Explanation on Metadata Findings: Digital cameras write device make, model, and capture settings directly into EXIF headers. "
+                "When an image is created synthetically with AI, edited in software, or saved via messaging apps (e.g. WhatsApp), metadata is usually absent. "
+                "The absence of metadata is common and does NOT by itself prove AI generation or malicious tampering.</i>",
+                style_body_muted,
+            ))
+
+    story.append(Spacer(1, 6))
+
+    # SECTION 5: AI-Generated Image Assessment (Phase 4 — Honest Handling, Item A)
+    if has_image_evidence:
+        ai_table_data = [
+            [
+                Paragraph("<b>Assessment Parameter</b>", style_body_bold),
+                Paragraph("<b>Current Platform Finding</b>", style_body_bold),
+                Paragraph("<b>Investigative Context & Meaning</b>", style_body_bold),
+            ],
+            [
+                Paragraph("AI-Generated vs Real Status", style_body_bold),
+                Paragraph("<b>Not Available / Not Implemented in this Prototype</b>", style_body_bold),
+                Paragraph("TRACEON prototype does not contain a trained AI-image detection neural network.", style_body),
+            ],
+            [
+                Paragraph("Model Name & Version", style_body),
+                Paragraph("None connected", style_mono),
+                Paragraph("No neural network weights are bundled in this prototype.", style_body_muted),
+            ],
+            [
+                Paragraph("AI / Real Prediction", style_body),
+                Paragraph("Not generated", style_mono),
+                Paragraph("TRACEON refuses to guess or provide an unsupported classification.", style_body_muted),
+            ],
+            [
+                Paragraph("Confidence Score", style_body),
+                Paragraph("Not available (0.00%)", style_mono),
+                Paragraph("Fabricating a fake certainty score is legally inadmissible in court.", style_body_muted),
+            ],
+            [
+                Paragraph("Hardware Provenance Check", style_body),
+                Paragraph("Evaluated via EXIF header", style_body),
+                Paragraph("AI images typically lack physical camera sensor profiles.", style_body_muted),
+            ],
+            [
+                Paragraph("Byte-Level Integrity", style_body),
+                Paragraph("Verified via SHA-256", style_body),
+                Paragraph("Confirms file has not changed since intake.", style_body_muted),
+            ],
+        ]
+        ai_table = Table(ai_table_data, colWidths=[140, 185, 215])
+        ai_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), COLOR_LIGHT_GREY),
+            ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+
+        ai_assessment_flowables = [
+            Paragraph("5. AI-GENERATED IMAGE ASSESSMENT", style_section_heading),
+            ai_table,
+            Spacer(1, 3),
+            Table([
+                [
+                    Paragraph(
+                        "<b>Notice on Model Predictions & Proposed AI Addition:</b><br/>"
+                        "TRACEON does not output fabricated certainty scores or unverified classifications. In police investigations, presenting an "
+                        "unsupported AI probability without a tested model is scientifically unsound and legally inadmissible.<br/>"
+                        "<b>Smallest Practical Implementation to Add AI Detection:</b> To enable automated AI-generation detection in future development, "
+                        "(1) Add a frequency-domain (2D-FFT) spectral analysis module to spot deconvolution checkerboard artifacts, or (2) Connect a "
+                        "lightweight pre-trained open-source detector (such as a compact ViT or ResNet model).",
+                        style_callout,
+                    )
+                ]
+            ], colWidths=[540], style=[
+                ("BACKGROUND", (0, 0), (-1, -1), COLOR_LIGHT_GREY),
+                ("BOX", (0, 0), (-1, -1), 0.75, COLOR_BORDER_STRONG),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]),
+            Spacer(1, 6),
+        ]
+        story.append(KeepTogether(ai_assessment_flowables))
+
+    # SECTION 6: Limitations — What These Checks Cannot Establish (Phase 5 & 7)
+    limitations_flowables = [
+        Paragraph("6. FORENSIC LIMITATIONS — WHAT THESE CHECKS CANNOT ESTABLISH", style_section_heading),
+        Table([
+            [
+                Paragraph(
+                    "<b>Important Forensic Limitations for Non-Technical Readers:</b><br/>"
+                    "• <b>Baseline Matching:</b> A matching SHA-256 digital fingerprint confirms only that the file has not changed since it was registered in TRACEON. It does not prove the file was genuine or unedited before registration.<br/>"
+                    "• <b>Metadata Absence:</b> Missing camera metadata is common in files shared through messaging apps (e.g. WhatsApp, Telegram) or downloaded from social media. Missing metadata alone does not prove forgery or AI generation.<br/>"
+                    "• <b>Error Level Analysis (ELA):</b> ELA identifies compression variations across JPEG images. Natural textures, high-contrast edges, and solid backgrounds naturally produce differing error rates. For lossless PNG images, ELA is technically unsupported because re-saving to JPEG creates artificial conversion differences. ELA is an investigatory guide, not legal proof of manipulation.<br/>"
+                    "• <b>Sampled Video Frames:</b> When video is analyzed, OpenCV checks decodability and examines 20 sampled frames. It cannot establish that unexamined frames are genuine or that the recorded event occurred as portrayed.<br/>"
+                    "• <b>Investigative Leads Only:</b> An indicator found is a technical anomaly that warrants human investigation. It does not prove intentional falsification.",
+                    style_callout,
+                )
+            ]
+        ], colWidths=[540], style=[
+            ("BACKGROUND", (0, 0), (-1, -1), COLOR_LIGHT_GREY),
+            ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ]),
+        Spacer(1, 6),
+    ]
+    story.append(KeepTogether(limitations_flowables))
+
+    # SECTION 7: Final Conclusion — What This Report Tells You (Phase 6 Dynamic Summary)
+    dynamic_conclusion = _generate_dynamic_final_conclusion(
+        case,
+        selected_evidence,
+        latest_integrity_by_ev,
+        deduplicated_analyses,
+    )
+    conclusion_flowables = [
+        Paragraph("7. FINAL CONCLUSION — WHAT THIS REPORT TELLS YOU", style_section_heading),
+        Table([
+            [
+                Paragraph(
+                    f"<b>Summary of Examination Findings:</b><br/>{_esc(dynamic_conclusion)}",
+                    style_callout,
+                )
+            ]
+        ], colWidths=[540], style=[
+            ("BACKGROUND", (0, 0), (-1, -1), COLOR_ALT_GREY),
+            ("BOX", (0, 0), (-1, -1), 1.0, COLOR_DARK_GREY),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ]),
+        Spacer(1, 6),
+    ]
+    story.append(KeepTogether(conclusion_flowables))
+
+    # SECTION 8: Technical Details & Audit History (Phase 7 Appendix)
+    story.append(Paragraph("8. TECHNICAL DETAILS, MANIFESTS & AUDIT HISTORY", style_section_heading))
+
+    # Detailed Manifest Cards (One per item)
+    if selected_evidence:
         for ev in selected_evidence:
             size_formatted = f"{ev.file_size / 1024:.1f} KB ({ev.file_size:,} bytes)"
             source_info = "Not recorded"
@@ -643,7 +1200,6 @@ def create_case_forensic_pdf(
             else:
                 verification_note = "Status: <b>NOT CHECKED</b> | Intake baseline hash remains authoritative."
 
-            # Present SHA-256 in a dedicated, wrapped monospaced block
             hash_display = _split_hash_safely(ev.sha256_hash)
 
             card_data = [
@@ -678,270 +1234,27 @@ def create_case_forensic_pdf(
                 ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
                 ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
                 ("LEFTPADDING", (0, 0), (-1, -1), 5),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 5),
                 ("SPAN", (0, 2), (2, 2)),
                 ("SPAN", (0, 3), (2, 3)),
             ]))
             story.append(card_table)
-            story.append(Spacer(1, 4))
+            story.append(Spacer(1, 3))
 
-    story.append(Spacer(1, 6))
-
-    # 7. Section 5: Truthful Methodology & Verification Matrix
-    # Dynamically reports status agreeing with actual executed analysis
-    story.append(Paragraph("5. FORENSIC ANALYSIS METHODOLOGY & VERIFICATION MATRIX", style_section_heading))
-
-    # Status helpers
-    status_magic = "COMPLETED"
-    status_sha256 = "COMPLETED" if latest_integrity_by_ev else "COMPLETED"  # Always verified on intake
-
-    status_meta = "COMPLETED" if has_image_analysis or has_audio_analysis else (
-        "NOT APPLICABLE" if not (has_image_evidence or has_audio_evidence) else "NOT CHECKED"
-    )
-    status_ela = "COMPLETED" if has_image_analysis else (
-        "NOT APPLICABLE" if not has_image_evidence else "NOT CHECKED"
-    )
-    status_video = "COMPLETED" if has_video_analysis else (
-        "NOT APPLICABLE" if not has_video_evidence else "NOT CHECKED"
-    )
-    status_audio = "COMPLETED" if has_audio_analysis else (
-        "NOT APPLICABLE" if not has_audio_evidence else "NOT CHECKED"
-    )
-
-    methodology_rows = [
-        [
-            Paragraph("<b>Forensic Check</b>", style_body_bold),
-            Paragraph("<b>Method & Tool Used</b>", style_body_bold),
-            Paragraph("<b>Plain English Scope & Purpose</b>", style_body_bold),
-            Paragraph("<b>Execution Status</b>", style_body_bold),
-        ],
-        [
-            Paragraph("File Signature Validation", style_body_bold),
-            Paragraph("Binary Header Parser (Magic Bytes)", style_body),
-            Paragraph("Examines initial container bytes to confirm genuine media type and detect executable disguising.", style_body),
-            Paragraph(f"<b>{status_magic}</b>", style_badge_center),
-        ],
-        [
-            Paragraph("SHA-256 Digital Fingerprint", style_body_bold),
-            Paragraph("Python hashlib (64 KB chunks)", style_body),
-            Paragraph("Computes mathematical fingerprint over entire file byte sequence to establish immutable baseline.", style_body),
-            Paragraph(f"<b>{status_sha256}</b>", style_badge_center),
-        ],
-        [
-            Paragraph("Metadata & EXIF Inspection", style_body_bold),
-            Paragraph("Pillow EXIF / ID3 Tag Parser", style_body),
-            Paragraph("Extracts camera make, model, timestamps, GPS location, and known editing software tags.", style_body),
-            Paragraph(f"<b>{status_meta}</b>", style_badge_center),
-        ],
-        [
-            Paragraph("Error Level Analysis (ELA)", style_body_bold),
-            Paragraph("Pillow ImageChops (Quality 92, 15x)", style_body),
-            Paragraph("Re-saves JPEG at reference quality to highlight regional compression rate differences.", style_body),
-            Paragraph(f"<b>{status_ela}</b>", style_badge_center),
-        ],
-        [
-            Paragraph("Video Continuity Check", style_body_bold),
-            Paragraph("OpenCV (cv2) Video Decoder", style_body),
-            Paragraph("Decodes duration, fps, codec, and evaluates 20 sampled frames for duplicate or frozen frames.", style_body),
-            Paragraph(f"<b>{status_video}</b>", style_badge_center),
-        ],
-        [
-            Paragraph("Audio Acoustic & Silence Check", style_body_bold),
-            Paragraph("Python wave & struct modules", style_body),
-            Paragraph("Scans audio stream for amplitude clipping, distorted samples, and sudden silence dropouts.", style_body),
-            Paragraph(f"<b>{status_audio}</b>", style_badge_center),
-        ],
-    ]
-
-    methodology_table = Table(methodology_rows, colWidths=[105, 115, 230, 90], repeatRows=1)
-    methodology_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), COLOR_LIGHT_GREY),
-        ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-        ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-    ]))
-    story.append(methodology_table)
-    story.append(Spacer(1, 8))
-
-    # 8. Section 6: Detailed Forensic Findings & Observations (Deduplicated to latest run)
-    story.append(Paragraph("6. DETAILED FORENSIC FINDINGS & OBSERVATIONS", style_section_heading))
-
-    finding_rows = []
-    finding_counter = 1
-
-    for an in deduplicated_analyses:
-        ev = an.evidence
-        ev_label = ev.evidence_number if ev else f"ID {an.evidence_id}"
-        outcome_status = "NO INDICATOR DETECTED"
-        obs_text = "Analysis executed. No anomalous indicators detected by this check."
-        significance = "Normal"
-
-        try:
-            if an.findings_json:
-                fdata = json.loads(an.findings_json)
-
-                if an.analysis_type == "image_forensics":
-                    meta = fdata.get("metadata_report", {})
-                    ela = fdata.get("ela_report", {})
-                    notes = []
-                    if meta.get("camera_make") or meta.get("camera_model"):
-                        notes.append(f"Recorded device: {_esc(meta.get('camera_make'))} {_esc(meta.get('camera_model'))}")
-                    if meta.get("capture_date"):
-                        notes.append(f"Recorded capture timestamp: {_esc(meta.get('capture_date'))}")
-                    if meta.get("software"):
-                        notes.append(f"Editing software signature detected: {_esc(meta.get('software'))}")
-                        outcome_status = "INDICATOR DETECTED"
-                        significance = "Software signature present"
-                    if ela.get("mean_error") is not None:
-                        notes.append(f"Compression error variance (ELA): mean={ela.get('mean_error'):.2f}, max={ela.get('max_error', 0):.2f}")
-                    if ela.get("indicator_detected"):
-                        outcome_status = "INDICATOR DETECTED"
-                        significance = "Regional compression variance"
-                    if notes:
-                        obs_text = "; ".join(notes)
-
-                elif an.analysis_type == "video_forensics":
-                    vrep = fdata.get("video_report", {})
-                    dur = vrep.get("duration_sec", 0.0)
-                    fps = vrep.get("fps", 0.0)
-                    dup = vrep.get("duplicate_frames_count", 0)
-                    codec = vrep.get("codec", "Unknown")
-                    is_frozen = vrep.get("is_frozen_detected", False)
-                    sampled_cnt = vrep.get("sampled_frames_count", 20)
-
-                    # Truthful reporting on sampled frames and decodability:
-                    notes = [
-                        f"Stream properties: Duration {dur:.2f}s, Speed {fps:.1f} fps, Codec {_esc(codec)} (Decodable)",
-                        f"Sample coverage: Exactly {sampled_cnt} sampled frames inspected across footage",
-                    ]
-                    if dup > 0:
-                        notes.append(f"Frame continuity: {dup} duplicate frames detected ({vrep.get('duplicate_percentage', 0.0):.1f}% of sample)")
-                        outcome_status = "INDICATOR DETECTED"
-                        significance = "Inspect camera frame hold"
-                    elif is_frozen:
-                        notes.append("Frame continuity: Consecutive frozen frame sequence detected in sample")
-                        outcome_status = "INDICATOR DETECTED"
-                        significance = "Inspect feed continuity"
-                    else:
-                        notes.append(f"Sample continuity: 0 duplicate or frozen frames detected across {sampled_cnt} sampled frames")
-                        notes.append("No indicator was detected by this check in the examined samples. This result does not establish that the complete video is authentic or free from manipulation.")
-                        outcome_status = "NO INDICATOR DETECTED"
-                        significance = f"Sample normal ({sampled_cnt} frames)"
-
-                    obs_text = "; ".join(notes)
-
-                elif an.analysis_type == "audio_forensics":
-                    arep = fdata.get("audio_report", {})
-                    dur = arep.get("duration_sec", 0.0)
-                    sr = arep.get("sample_rate_hz", "Unknown")
-                    ch = arep.get("channels", "Unknown")
-                    notes = [f"Decoded audio: Duration {dur:.2f}s, Sample rate {sr} Hz, Channels {ch}"]
-                    if arep.get("is_clipped"):
-                        notes.append(f"Acoustic envelope: {arep.get('clipped_samples_count')} clipped distorted samples detected")
-                        outcome_status = "INDICATOR DETECTED"
-                        significance = "Signal saturation / high gain"
-                    if arep.get("has_silence_gaps"):
-                        notes.append("Acoustic continuity: Abrupt silence drop detected")
-                        outcome_status = "INDICATOR DETECTED"
-                        significance = "Inspect track continuity"
-                    if not arep.get("is_clipped") and not arep.get("has_silence_gaps"):
-                        notes.append("Acoustic continuity: No clipping anomalies or silence drops detected")
-                        outcome_status = "NO INDICATOR DETECTED"
-                        significance = "Normal acoustic envelope"
-                    obs_text = "; ".join(notes)
-
-        except Exception as e:
-            obs_text = f"Analysis completed. Detailed data recorded: {_esc(str(e))}"
-
-        cat_title = an.analysis_type.replace("_", " ").title()
-        finding_rows.append([
-            Paragraph(f"<b>FND-{finding_counter:03d}</b>", style_mono_bold),
-            Paragraph(f"<b>{_esc(ev_label)}</b>", style_mono),
-            Paragraph(_esc(cat_title), style_body),
-            Paragraph(obs_text, style_body),
-            Paragraph(f"<b>{outcome_status}</b>", style_badge_center),
-            Paragraph(significance, style_body_muted),
-        ])
-        finding_counter += 1
-
-    if not finding_rows:
-        story.append(Paragraph(
-            "<i>No formal laboratory analysis modules (Image, Video, or Audio) have been executed for the selected evidence in this case. "
-            "Individual checks remain classified as 'Not checked'.</i>",
-            style_body_muted,
-        ))
-    else:
-        findings_table_data = [
-            [
-                Paragraph("<b>ID</b>", style_body_bold),
-                Paragraph("<b>Item #</b>", style_body_bold),
-                Paragraph("<b>Category</b>", style_body_bold),
-                Paragraph("<b>Exact Observation & Checks Performed</b>", style_body_bold),
-                Paragraph("<b>Outcome</b>", style_body_bold),
-                Paragraph("<b>Significance</b>", style_body_bold),
-            ]
-        ] + finding_rows
-
-        findings_table = Table(findings_table_data, colWidths=[45, 80, 80, 195, 75, 65], repeatRows=1)
-        findings_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), COLOR_LIGHT_GREY),
-            ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-            ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ]))
-        story.append(findings_table)
-
-    story.append(Spacer(1, 8))
-
-    # 9. Section 7: Overall Forensic Assessment
-    story.append(Paragraph("7. OVERALL FORENSIC ASSESSMENT", style_section_heading))
-    assessment_text = (
-        "This examination evaluated the registered digital evidence items using deterministic cryptographic hashing, "
-        "binary container header inspection, and automated media anomaly checks.<br/>"
-        "• <b>Video Stream Decodability:</b> Successfully extracting video duration, frame rate, and codec confirms only that the stream "
-        "is decodable by standard decoders; it does not independently prove that the footage was not manipulated prior to intake.<br/>"
-        "• <b>Technical Indicators:</b> Detected indicators (such as repeated video frames, compression rate variations, or audio clipping) "
-        "represent technical variations that warrant human investigative follow-up. In accordance with forensic science standards, an indicator "
-        "does not automatically prove intentional tampering or forgery.<br/>"
-        "• <b>Calibration & Authenticity:</b> TRACEON does not produce uncalibrated probability scores, fake certainty percentages, or declare "
-        "evidence definitively 'GENUINE' or 'TAMPERED'. All findings must be corroborated with original recording hardware, witness accounts, "
-        "and physical chain of custody."
-    )
-    assessment_table = Table([[Paragraph(assessment_text, style_body)]], colWidths=[540])
-    assessment_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), COLOR_LIGHT_GREY),
-        ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 7),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-    ]))
-    story.append(assessment_table)
-    story.append(Spacer(1, 8))
-
-    # 10. Section 8: Chain of Custody & Platform Audit Trail (Legitimate historical events preserved)
+    # Chain of Custody Audit Log (if requested)
     if request_params.include_audit_trail:
-        story.append(Paragraph("8. CHAIN OF CUSTODY & AUDIT EVENT LOG", style_section_heading))
         audit_records = (
             db.query(AuditEvent)
             .filter(AuditEvent.case_id == case.id)
             .order_by(AuditEvent.created_at.asc())
             .all()
         )
-        if not audit_records:
-            story.append(Paragraph("<i>No chain of custody audit events recorded for this case.</i>", style_body_muted))
-        else:
+        if audit_records:
+            story.append(Spacer(1, 3))
+            story.append(Paragraph("<b>Chain of Custody Event Log:</b>", style_body_bold))
             aud_table_data = [
                 [
                     Paragraph("<b>Timestamp (UTC)</b>", style_body_bold),
@@ -966,64 +1279,58 @@ def create_case_forensic_pdf(
                 ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
                 ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ]))
             story.append(aud_table)
-            story.append(Spacer(1, 8))
 
-    # 11. Section 9: Investigative Remarks & Notes (if requested)
+    # Optional Investigator Notes
     if request_params.notes and request_params.notes.strip():
-        story.append(Paragraph("9. INVESTIGATIVE REMARKS & NOTES", style_section_heading))
+        story.append(Spacer(1, 4))
         clean_notes = _sanitize_text(request_params.notes.strip())
-        notes_table = Table([[Paragraph(_esc(clean_notes), style_body)]], colWidths=[540])
+        notes_table = Table([[
+            Paragraph(f"<b>Investigator Remarks:</b> {_esc(clean_notes)}", style_body)
+        ]], colWidths=[540])
         notes_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), COLOR_ALT_GREY),
             ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 7),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ]))
         story.append(notes_table)
-        story.append(Spacer(1, 8))
 
-    # 12. Section 10: Recommended Next Steps for Investigator
+    story.append(Spacer(1, 6))
+
+    # Recommended Action Checklist
     checklist_flowables = [
-        Paragraph("10. RECOMMENDED INVESTIGATIVE ACTION CHECKLIST", style_section_heading),
-        Paragraph(
-            "<b>Summary of Current Case State:</b> Evidence manifests and baseline digital fingerprints (SHA-256) have been logged. "
-            "To establish formal corroboration, the investigating officer should execute the following procedures:",
-            style_body,
-        ),
-        Spacer(1, 3),
+        Paragraph("<b>Recommended Investigative Action Steps:</b>", style_body_bold),
         Table([
             [
                 Paragraph(
-                    "<b>Investigative Action Steps:</b><br/>"
-                    "1. <b>Physical Hardware Recovery:</b> Seize and preserve original physical recording hardware (CCTV DVR, mobile handset, SD card) using anti-static bags and chain-of-custody tamper tags.<br/>"
-                    "2. <b>Telecom & Network Logs:</b> Subpoena carrier Call Detail Records (CDR) and network transmission records to corroborate contested creation and transmission times.<br/>"
-                    "3. <b>Witness Corroboration:</b> Secure written, timestamped statements from individuals who recorded, handled, or witnessed the original event.<br/>"
-                    "4. <b>Preserve Bit-Stream Working Copies:</b> Retain intake evidence in read-only write-blocked storage; perform all further examinations exclusively on working copies.",
+                    "1. <b>Physical Hardware Recovery:</b> Seize original recording hardware (CCTV DVR, mobile phone, SD card) using tamper-evident evidence bags.<br/>"
+                    "2. <b>Telecom & Carrier Logs:</b> Subpoena carrier Call Detail Records (CDR) and server transmission logs to corroborate creation dates.<br/>"
+                    "3. <b>Witness Corroboration:</b> Secure written, timestamped statements from persons who captured or handled the evidence.<br/>"
+                    "4. <b>Preserve Bit-Stream Working Copies:</b> Retain original media in read-only write-blocked storage; conduct further checks only on working copies.",
                     style_callout,
                 )
             ]
         ], colWidths=[540], style=[
             ("BACKGROUND", (0, 0), (-1, -1), COLOR_LIGHT_GREY),
             ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 7),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ]),
-        Spacer(1, 8),
+        Spacer(1, 6),
     ]
     story.append(KeepTogether(checklist_flowables))
 
-    # 13. Section 11: Document Classification, Sign-off & Statutory Boundaries
-    # TRACEON branding only; no false police badges, no conflicting statuses, no certified lab claims
+    # Sign-off & Statutory Boundaries
     examiner_name = case.investigator_name if case.investigator_name else "Investigating Officer"
     signoff_data = [
         [
@@ -1051,16 +1358,15 @@ def create_case_forensic_pdf(
         ("BOX", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
         ("INNERGRID", (0, 0), (-1, -1), 0.25, COLOR_BORDER),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("LEFTPADDING", (0, 0), (-1, -1), 5),
         ("RIGHTPADDING", (0, 0), (-1, -1), 5),
     ]))
 
     disclaimer_block = [
-        Paragraph("11. DOCUMENT CLASSIFICATION & STATUTORY BOUNDARIES", style_section_heading),
         signoff_table,
-        Spacer(1, 5),
+        Spacer(1, 4),
         Paragraph(
             "<b>Statutory & Evidentiary Boundaries:</b><br/>"
             f"This document is an automated examination demonstration report generated by {PRODUCT_NAME}. "

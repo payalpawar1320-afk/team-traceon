@@ -141,7 +141,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ initialCaseId, onNavig
           STEP 5 OF 5
         </span>
         <span>
-          <strong>Final Forensic Examination Report:</strong> Compile all verified SHA-256 digests, multi-modal analysis findings, and chain-of-custody audit logs into an official court-ready ReportLab PDF document.
+          <strong>Forensic Examination Report:</strong> Compile all verified digital fingerprints (SHA-256), multi-modal analysis findings, and chain-of-custody audit logs into a clear, structured PDF examination report.
         </span>
       </div>
 
