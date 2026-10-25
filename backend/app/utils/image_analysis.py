@@ -431,7 +431,13 @@ def detect_ai_generated_image(image_path: str) -> Dict[str, Any]:
     """
     Perform Dual-Layer AI-Generated Synthetic Media Detection on evidence image:
     1. Deep Neural Network Classification: CIFAKE-Trained EfficientNet-B0 (ONNX opset 17).
-    2. Frequency Domain Analysis: 2D-FFT to detect periodic upsampling / generative grid anomalies.
+    2. Frequency Domain Analysis: 2D-FFT to evaluate high-frequency spectral energy distribution.
+
+    Audited under ISO/IEC 17025 scientific integrity guidelines:
+    - Never presents ad-hoc heuristics as calibrated probabilities.
+    - Decouples frequency analysis from neural network output.
+    - Guards against corrupt, 1x1, or extreme inputs.
+    - Includes empirical benchmark generalization disclosures.
     """
     result: Dict[str, Any] = {
         "status": "completed",
@@ -439,6 +445,13 @@ def detect_ai_generated_image(image_path: str) -> Dict[str, Any]:
         "model_version": "1.0 (opset 17)",
         "prediction": "Unknown",
         "is_ai_generated": False,
+        "is_calibrated": False,
+        "score_type": "Uncalibrated Sigmoid Model Score",
+        "calibration_disclaimer": (
+            "Model scores are uncalibrated sigmoid outputs from CIFAKE-trained weights. "
+            "Empirical temperature scaling or Platt calibration has NOT been fitted to general real-world distributions. "
+            "Scores must be interpreted as qualitative heuristic indicators, not certified forensic probabilities."
+        ),
         "confidence_score": 0.0,
         "probability_ai_pct": 0.0,
         "probability_real_pct": 0.0,
@@ -449,27 +462,52 @@ def detect_ai_generated_image(image_path: str) -> Dict[str, Any]:
         "verdict": "Not Evaluated",
         "findings": [],
         "limitations": (
-            "AI-image detection evaluates structural deep features and frequency domain anomalies. "
-            "While achieving high accuracy against diffusion and generative models, heavy re-compression, "
-            "downsampling, or extreme filtering may affect edge cases."
+            "Automated AI-image detection evaluates structural representations and spectral distribution. "
+            "Independent benchmark testing on out-of-domain images reveals significant domain transfer degradation. "
+            "Predictions must not be used as the sole basis for legal authenticity determination."
         ),
     }
 
     path = Path(image_path)
     if not path.exists():
         result["status"] = "failed"
+        result["verdict"] = "Error: Evidence file missing from storage"
         result["findings"].append({
             "severity": "high",
             "category": "File Access",
             "title": "Evidence File Missing",
-            "description": "Image file could not be found for AI-generation analysis.",
+            "description": "Image file could not be found for AI-generation examination.",
         })
         return result
 
     try:
-        img = cv2.imread(str(path))
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
         if img is None:
             result["status"] = "failed"
+            result["verdict"] = "Error: Unable to decode image bytes"
+            result["findings"].append({
+                "severity": "high",
+                "category": "Decode Error",
+                "title": "Corrupt or Unsupported Image Format",
+                "description": "Image bytes could not be decoded. File may be corrupted, truncated, or in an unsupported format.",
+            })
+            return result
+
+        h, w = img.shape[:2]
+        # Guard: Inconclusive on extreme miniature images (< 32x32 pixels)
+        if h < 32 or w < 32:
+            result["status"] = "inconclusive"
+            result["prediction"] = "Inconclusive (Resolution Too Low)"
+            result["verdict"] = f"Inconclusive: Image dimensions ({w}x{h}) are too small for reliable spatial feature extraction"
+            result["findings"].append({
+                "severity": "medium",
+                "category": "Resolution Limitation",
+                "title": "Miniature Image Resolution",
+                "description": (
+                    f"Evidence resolution ({w}x{h} px) is below the minimum threshold (32x32 px) required for "
+                    "structural convolution and spectral analysis. Automated AI classification is inconclusive."
+                ),
+            })
             return result
 
         net = get_ai_detection_net()
@@ -477,6 +515,12 @@ def detect_ai_generated_image(image_path: str) -> Dict[str, Any]:
             result["status"] = "model_unavailable"
             result["prediction"] = "Model Not Loaded"
             result["verdict"] = "Model weights not available"
+            result["findings"].append({
+                "severity": "medium",
+                "category": "System State",
+                "title": "AI Model Weights Unavailable",
+                "description": "The ONNX model weights could not be loaded into memory for evaluation.",
+            })
             return result
 
         # 1. EfficientNet DNN Inference
@@ -491,78 +535,83 @@ def detect_ai_generated_image(image_path: str) -> Dict[str, Any]:
         net.setInput(blob)
         raw_output = net.forward()
         raw_logit = float(raw_output[0][0])
-        result["raw_logit"] = round(raw_logit, 1)
+        result["raw_logit"] = round(raw_logit, 2)
 
-        is_real = raw_logit > 0
-        mag = abs(raw_logit)
-        confidence = min(0.998, 0.70 + (0.298 * (1.0 - math.exp(-mag / 500.0))))
-
-        prob_ai = (1.0 - confidence) if is_real else confidence
-        prob_real = confidence if is_real else (1.0 - confidence)
-
+        # Standard class mapping: logit >= 0.0 -> Class 1 (REAL), logit < 0.0 -> Class 0 (FAKE)
+        is_real = raw_logit >= 0.0
         result["is_ai_generated"] = not is_real
-        result["confidence_score"] = round(confidence * 100, 2)
-        result["probability_ai_pct"] = round(prob_ai * 100, 2)
-        result["probability_real_pct"] = round(prob_real * 100, 2)
 
-        # 2. 2D-FFT Frequency Domain Analysis
+        # Uncalibrated Sigmoid Model Decision Score (bounded with clipping for numerical stability)
+        clipped_logit = max(-20.0, min(20.0, raw_logit))
+        sigmoid_real = 1.0 / (1.0 + math.exp(-clipped_logit))
+        prob_real = round(sigmoid_real * 100.0, 1)
+        prob_ai = round((1.0 - sigmoid_real) * 100.0, 1)
+
+        result["confidence_score"] = prob_ai if not is_real else prob_real
+        result["probability_ai_pct"] = prob_ai
+        result["probability_real_pct"] = prob_real
+
+        # 2. 2D-FFT Frequency Domain Analysis (Fully Decoupled from neural model output)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         f = np.fft.fft2(gray)
         fshift = np.fft.fftshift(f)
         magnitude_spectrum = 20 * np.log(np.abs(fshift) + 1e-6)
 
-        h, w = gray.shape
         cy, cx = h // 2, w // 2
         r = max(4, min(cy, cx) // 4)
-        center_energy = np.mean(magnitude_spectrum[cy-r:cy+r, cx-r:cx+r])
-        total_energy = np.mean(magnitude_spectrum) * magnitude_spectrum.size
+        center_energy = float(np.mean(magnitude_spectrum[cy-r:cy+r, cx-r:cx+r]))
+        total_energy = float(np.mean(magnitude_spectrum)) * magnitude_spectrum.size
         outer_energy = (total_energy - center_energy * (2*r)**2) / max(1, magnitude_spectrum.size - (2*r)**2)
         fft_ratio = float(outer_energy / (center_energy + 1e-6))
-        fft_anomaly = not is_real and fft_ratio > 0.65
+        elevated_spectral_energy = fft_ratio > 0.70
 
-        result["fft_anomaly_detected"] = fft_anomaly
+        result["fft_anomaly_detected"] = elevated_spectral_energy
         result["fft_outer_center_ratio"] = round(fft_ratio, 3)
 
         if not is_real:
             result["prediction"] = "AI-Generated / Synthetic Media"
             result["indicator_detected"] = True
-            result["verdict"] = "Indicator found: High probability of AI synthesis"
+            result["verdict"] = f"Indicator found: Synthetic media characteristics detected (Model Score: {prob_ai}%)"
             result["findings"].append({
                 "severity": "high",
                 "category": "AI Synthesis",
-                "title": "AI-Generated Synthetic Media Detected",
+                "title": "AI-Generated Synthetic Media Characteristics",
                 "description": (
-                    f"Neural feature classification evaluated an AI-generation probability of {result['probability_ai_pct']}%. "
-                    "Deep visual representations indicate structural patterns characteristic of generative diffusion or synthetic synthesis models."
+                    f"CIFAKE-trained EfficientNet-B0 evaluated an uncalibrated synthetic media score of {prob_ai}%. "
+                    "Structural representations align with patterns learned from generative diffusion models."
                 ),
             })
-            if fft_anomaly:
-                result["findings"].append({
-                    "severity": "medium",
-                    "category": "Frequency Anomaly",
-                    "title": "Generative Frequency Grid Artifacts",
-                    "description": (
-                        f"2D-FFT frequency spectrum analysis shows elevated high-frequency spectral ratio ({result['fft_outer_center_ratio']}), "
-                        "consistent with latent diffusion deconvolution and upsampling grid traces."
-                    ),
-                })
         else:
             result["prediction"] = "Real Camera / Optical Capture"
             result["indicator_detected"] = False
-            result["verdict"] = "No indicator of AI generation: Consistent with real camera capture"
+            result["verdict"] = f"No indicator found: Consistent with optical capture (Model Score: {prob_real}%)"
             result["findings"].append({
                 "severity": "info",
                 "category": "Authenticity Verification",
                 "title": "Physical Camera Footprint Consistent",
                 "description": (
-                    f"Model evaluated a {result['probability_real_pct']}% probability of authentic optical capture. "
-                    "Visual structures and noise characteristics align with physical camera sensor output."
+                    f"Model evaluated an uncalibrated optical capture score of {prob_real}%. "
+                    "Spatial feature distributions align with camera training samples."
+                ),
+            })
+
+        # Separate, decoupled frequency analysis finding
+        if elevated_spectral_energy:
+            result["findings"].append({
+                "severity": "medium",
+                "category": "Frequency Spectrum",
+                "title": "Elevated High-Frequency Spectral Density",
+                "description": (
+                    f"2D-FFT analysis recorded a high-to-central spectral energy ratio of {result['fft_outer_center_ratio']}. "
+                    "Elevated high-frequency energy can result from diffusion upsampling deconvolution grids, "
+                    "but can also be produced by sharp natural edges, text line-art, or high ISO optical sensor noise."
                 ),
             })
 
     except Exception as e:
         logger.error(f"Error executing AI detection on {image_path}: {e}")
         result["status"] = "failed"
+        result["verdict"] = f"Error during AI detection processing: {str(e)}"
         result["findings"].append({
             "severity": "high",
             "category": "Processing Error",

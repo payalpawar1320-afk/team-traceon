@@ -304,9 +304,9 @@ def _generate_dynamic_final_conclusion(
 
         if ai_ran:
             if ai_is_synthetic:
-                ai_clause = f"The CIFAKE-trained AI detector evaluated the image as synthetic media with an AI-generation probability of {ai_prob:.1f}%."
+                ai_clause = f"The CIFAKE-trained AI detector evaluated an uncalibrated AI-likelihood score of {ai_prob:.1f}% (heuristic indicator, not legal proof)."
             else:
-                ai_clause = f"The CIFAKE-trained AI detector found no indicators of generative synthesis, classifying the file as consistent with an authentic camera capture ({100.0 - ai_prob:.1f}% probability)."
+                ai_clause = f"The CIFAKE-trained AI detector evaluated an uncalibrated camera-capture consistency score of {100.0 - ai_prob:.1f}% (heuristic indicator, not legal proof)."
         else:
             ai_clause = (
                 "An automated AI-image detector was not run on this case because image forensics analysis has not been executed yet."
@@ -1088,7 +1088,7 @@ def create_case_forensic_pdf(
             score_text = f"{prob_ai:.1f}% AI / {prob_real:.1f}% Real"
             fft_detected = ai_report.get("fft_anomaly_detected", False)
             fft_ratio = ai_report.get("fft_outer_center_ratio", 0.0)
-            fft_text = f"Grid Anomaly Detected (ratio {fft_ratio:.2f})" if fft_detected else f"Clean Optical Spectrum (ratio {fft_ratio:.2f})"
+            fft_text = f"High Ratio ({fft_ratio:.2f})" if fft_detected else f"Standard Ratio ({fft_ratio:.2f})"
 
             ai_table_data = [
                 [
@@ -1112,14 +1112,14 @@ def create_case_forensic_pdf(
                     Paragraph("Neural representation classification of spatial and texture structures.", style_body_muted),
                 ],
                 [
-                    Paragraph("Calibrated Probability", style_body),
+                    Paragraph("Model Decision Score (Uncalibrated)", style_body),
                     Paragraph(score_text, style_mono_bold),
-                    Paragraph(f"Model evaluated {conf_str} confidence on test benchmark distribution.", style_body_muted),
+                    Paragraph(f"Raw sigmoid output: {conf_str}. Not empirically calibrated for general real-world distributions.", style_body_muted),
                 ],
                 [
-                    Paragraph("Frequency (2D-FFT) Analysis", style_body),
+                    Paragraph("Frequency (2D-FFT) Metric", style_body),
                     Paragraph(fft_text, style_body),
-                    Paragraph("Spots high-frequency periodic grid traces typical of diffusion upsampling.", style_body_muted),
+                    Paragraph("High-to-center spectral energy ratio. Elevated values occur from natural textures; does not prove AI generation.", style_body_muted),
                 ],
                 [
                     Paragraph("Hardware Provenance Check", style_body),
@@ -1134,12 +1134,13 @@ def create_case_forensic_pdf(
             ]
 
             callout_text = (
-                f"<b>Notice on Model Predictions & Forensic Verification:</b><br/>"
-                f"TRACEON evaluated this image using an EfficientNet-B0 neural classifier trained on the CIFAKE dataset "
-                f"coupled with 2D-FFT frequency spectrum analysis. The model evaluated a <b>{prob_ai:.1f}% probability of AI synthesis</b> "
-                f"and <b>{prob_real:.1f}% probability of authentic optical capture</b>. "
-                f"In police investigations, statistical model outputs serve as investigative indicators and should be evaluated alongside "
-                f"intake provenance, chain of custody records, and source device acquisition."
+                f"<b>Notice on Model Predictions & Forensic Limitations:</b><br/>"
+                f"TRACEON evaluated this image using an experimental EfficientNet-B0 classifier trained on the CIFAKE dataset (32x32 images) "
+                f"alongside heuristic 2D-FFT frequency analysis. The model returned an <b>uncalibrated decision score of {prob_ai:.1f}% AI-likelihood</b> "
+                f"and <b>{prob_real:.1f}% camera-capture likelihood</b>.<br/>"
+                f"<b>Critical Forensic Limitations:</b> Independent testing on out-of-domain images (AI-vs-Real test set) demonstrated an accuracy of 54.5% "
+                f"and a 61.0% false-positive rate on natural photographs. Neural model scores and frequency anomalies do NOT constitute definitive proof of authenticity "
+                f"or synthetic generation, and must never be used alone to declare evidence genuine or fake in judicial proceedings."
             )
         else:
             ai_table_data = [
@@ -1182,8 +1183,9 @@ def create_case_forensic_pdf(
 
             callout_text = (
                 "<b>Notice on Model Predictions & Operational Status:</b><br/>"
-                "TRACEON integrates a CIFAKE-trained EfficientNet-B0 deep neural classifier and 2D-FFT frequency analysis. "
-                "Execute the Image Forensics module on the evidence details screen to compute real vs AI predictions for registered images."
+                "TRACEON integrates an experimental CIFAKE-trained EfficientNet-B0 deep neural classifier and 2D-FFT frequency analysis. "
+                "Execute the Image Forensics module on the evidence details screen to compute uncalibrated decision scores for registered images. "
+                "Scores are investigative heuristics and do not constitute certified forensic proof."
             )
 
         ai_table = Table(ai_table_data, colWidths=[140, 185, 215])

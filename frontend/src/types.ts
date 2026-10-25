@@ -158,6 +158,8 @@ export interface AIDetectionReport {
   raw_logit: number;
   fft_anomaly_detected: boolean;
   fft_outer_center_ratio: number;
+  is_calibrated?: boolean;
+  calibration_warning?: string;
   indicator_detected: boolean;
   verdict: string;
   findings: ForensicFinding[];

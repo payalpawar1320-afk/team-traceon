@@ -1256,7 +1256,7 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
                                 className={`badge ${aiReport.is_ai_generated ? 'badge-danger' : 'badge-success'}`}
                                 style={{ fontSize: '12px', padding: '4px 10px', fontWeight: 700 }}
                               >
-                                {aiReport.is_ai_generated ? 'AI-GENERATED SYNTHETIC MEDIA' : 'AUTHENTIC OPTICAL CAMERA CAPTURE'}
+                                {aiReport.is_ai_generated ? 'INDICATOR FOUND: LIKELY AI-GENERATED' : 'NO AI INDICATOR FOUND (CAMERA-CONSISTENT)'}
                               </span>
                               <span style={{ fontSize: '12px', color: '#64748b' }}>
                                 Model: <strong>{aiReport.model_name}</strong>
@@ -1267,8 +1267,8 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
                             </h3>
                             <p style={{ fontSize: '13px', color: '#334155', margin: '4px 0 0', maxWidth: '700px' }}>
                               {aiReport.is_ai_generated
-                                ? `Deep neural representation analysis indicates high structural probability (${aiReport.probability_ai_pct}%) of generative diffusion or synthetic generation.`
-                                : `Visual structures, spatial coherence, and frequency patterns align with physical camera sensor output (${aiReport.probability_real_pct}% probability).`}
+                                ? `Neural feature representations align with synthetic benchmark patterns (uncalibrated model score: ${aiReport.probability_ai_pct}%). Does not prove synthetic origin.`
+                                : `Neural feature representations align with physical camera benchmark patterns (uncalibrated model score: ${aiReport.probability_real_pct}%).`}
                             </p>
                           </div>
 
@@ -1277,7 +1277,7 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
                               {aiReport.is_ai_generated ? `${aiReport.probability_ai_pct}%` : `${aiReport.probability_real_pct}%`}
                             </div>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                              Confidence Rating
+                              Model Decision Score (Uncalibrated)
                             </div>
                           </div>
                         </div>
@@ -1285,13 +1285,37 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
                         {/* Probability Split Bar */}
                         <div style={{ marginTop: '16px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>
-                            <span style={{ color: '#dc2626' }}>AI Probability: {aiReport.probability_ai_pct}%</span>
-                            <span style={{ color: '#16a34a' }}>Real Camera: {aiReport.probability_real_pct}%</span>
+                            <span style={{ color: '#dc2626' }}>AI Decision Score (Uncalibrated): {aiReport.probability_ai_pct}%</span>
+                            <span style={{ color: '#16a34a' }}>Camera-Capture Consistency (Uncalibrated): {aiReport.probability_real_pct}%</span>
                           </div>
                           <div style={{ height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', display: 'flex' }}>
                             <div style={{ width: `${aiReport.probability_ai_pct}%`, background: '#dc2626' }} />
                             <div style={{ width: `${aiReport.probability_real_pct}%`, background: '#16a34a' }} />
                           </div>
+                        </div>
+                      </div>
+
+                      {/* Empirical Validation Limitation Warning */}
+                      <div
+                        className="notice-box notice-warning"
+                        style={{
+                          padding: '14px 18px',
+                          borderRadius: '8px',
+                          background: '#fffbeb',
+                          border: '1px solid #fde68a',
+                          color: '#92400e',
+                          fontSize: '12px',
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <AlertTriangle size={15} color="#b45309" />
+                          <span>Forensic Evaluation Disclosure &amp; Calibration Warning</span>
+                        </div>
+                        <div>
+                          <strong>Uncalibrated Heuristic:</strong> The displayed percentages are uncalibrated sigmoid transformations of neural logits, not empirical Bayesian probabilities.
+                          Independent testing on 200 non-training out-of-domain images (AI-vs-Real dataset) produced <strong>54.5% overall accuracy</strong> with a <strong>61.0% false-positive rate</strong> on authentic photographs.
+                          In legal and investigative contexts, this output must be treated as a heuristic indicator, never as standalone proof of authenticity or generation.
                         </div>
                       </div>
 
@@ -1306,18 +1330,19 @@ export const AnalysisResultsPage: React.FC<AnalysisResultsPageProps> = ({
                             <div>Model: <strong>{aiReport.model_name}</strong></div>
                             <div>Weights: <strong>CIFAKE Benchmark (120,000 images)</strong></div>
                             <div>Raw Output Logit: <span className="mono">{aiReport.raw_logit}</span></div>
+                            <div>Score Type: <strong>Uncalibrated Sigmoid</strong></div>
                           </div>
                         </div>
 
                         <div className="card" style={{ padding: '16px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                             <Activity size={16} color="#7c3aed" />
-                            <span style={{ fontWeight: 600, fontSize: '13px' }}>2D-FFT Frequency Analysis</span>
+                            <span style={{ fontWeight: 600, fontSize: '13px' }}>2D-FFT Spectral Energy Metric</span>
                           </div>
                           <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                            <div>Spectral Grid: <strong>{aiReport.fft_anomaly_detected ? 'Deconvolution Grid Anomaly' : 'Clean Continuous Spectrum'}</strong></div>
+                            <div>High-Freq Elevation: <strong>{aiReport.fft_anomaly_detected ? 'High Ratio Detected' : 'Standard Continuous Attenuation'}</strong></div>
                             <div>High-to-Center Ratio: <span className="mono">{aiReport.fft_outer_center_ratio}</span></div>
-                            <div>Signature: <strong>{aiReport.fft_anomaly_detected ? 'Diffusion Upsampling Artifacts' : 'Natural Optical Attenuation'}</strong></div>
+                            <div>Forensic Context: <strong>High ratios also occur from natural textures; does not prove AI.</strong></div>
                           </div>
                         </div>
 
