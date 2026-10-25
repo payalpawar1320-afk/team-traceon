@@ -192,7 +192,32 @@ def download_forensic_report(
             detail=f"Forensic report ID {report_id} was not found.",
         )
 
+    settings.ensure_storage_directories()
     file_path = Path(rep.report_path)
+    if not file_path.exists():
+        # Check by filename in current settings.REPORTS_DIR
+        alt_path = Path(settings.REPORTS_DIR) / rep.report_filename
+        if alt_path.exists():
+            file_path = alt_path
+        else:
+            # Ephemeral cloud container fallback: re-generate report dynamically on demand
+            case = db.query(Case).filter(Case.id == rep.case_id).first()
+            if case:
+                try:
+                    logger.info(f"Report file {rep.report_filename} not on disk (cloud restart). Auto-regenerating...")
+                    _, new_path, _ = create_case_forensic_pdf(
+                        case,
+                        db,
+                        ReportGenerateRequest(include_all_evidence=True, include_audit_trail=True),
+                        report_number=rep.report_number,
+                        output_filename=rep.report_filename,
+                    )
+                    file_path = Path(new_path)
+                    rep.report_path = str(file_path.resolve())
+                    db.commit()
+                except Exception as gen_err:
+                    logger.error(f"Failed to auto-regenerate missing report file: {gen_err}")
+
     if not file_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

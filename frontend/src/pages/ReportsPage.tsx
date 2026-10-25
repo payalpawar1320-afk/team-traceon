@@ -28,12 +28,40 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ initialCaseId, onNavig
   const [loadingCases, setLoadingCases] = useState<boolean>(true);
   const [loadingReports, setLoadingReports] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
+  const [downloadingReportId, setDownloadingReportId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Generation options
   const [includeAuditTrail, setIncludeAuditTrail] = useState<boolean>(true);
   const [investigatorNotes, setInvestigatorNotes] = useState<string>('');
+
+  // Robust cross-origin blob download handler
+  const handleDownloadReport = async (reportId: number, filename: string) => {
+    setDownloadingReportId(reportId);
+    setError(null);
+    try {
+      const downloadUrl = getReportDownloadUrl(reportId);
+      const res = await fetch(downloadUrl);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Download request failed with HTTP status ${res.status}`);
+      }
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to download report.');
+    } finally {
+      setDownloadingReportId(null);
+    }
+  };
 
   // 1. Load list of cases
   useEffect(() => {
@@ -319,14 +347,19 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ initialCaseId, onNavig
                       <StatusBadge status={rep.report_status.toUpperCase()} variant="success" />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <a
-                        href={getReportDownloadUrl(rep.id)}
-                        download={rep.report_filename}
-                        className="btn btn-secondary inline-flex items-center gap-1.5 text-xs py-1.5 px-3 font-medium text-blue-700 hover:text-blue-900 hover:bg-blue-50"
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadReport(rep.id, rep.report_filename)}
+                        disabled={downloadingReportId === rep.id}
+                        className="btn btn-secondary inline-flex items-center gap-1.5 text-xs py-1.5 px-3 font-medium text-blue-700 hover:text-blue-900 hover:bg-blue-50 cursor-pointer disabled:opacity-50"
                       >
-                        <Download size={13} />
-                        Download PDF
-                      </a>
+                        {downloadingReportId === rep.id ? (
+                          <RotateCcw className="animate-spin" size={13} />
+                        ) : (
+                          <Download size={13} />
+                        )}
+                        {downloadingReportId === rep.id ? 'Downloading...' : 'Download PDF'}
+                      </button>
                     </td>
                   </tr>
                 ))}

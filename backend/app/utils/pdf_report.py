@@ -310,6 +310,8 @@ def create_case_forensic_pdf(
     case: Case,
     db: Session,
     request_params: ReportGenerateRequest,
+    report_number: Optional[str] = None,
+    output_filename: Optional[str] = None,
 ) -> Tuple[str, str, int]:
     """
     Generate an authoritative, clear, visually striking and technically truthful
@@ -330,11 +332,11 @@ def create_case_forensic_pdf(
     - Clean technical appendix with manifests, SHA-256 digests, and chain of custody.
     """
     settings.ensure_storage_directories()
-    report_num = generate_unique_report_number(db)
+    report_num = report_number or generate_unique_report_number(db)
 
     clean_case_num = _sanitize_text(case.case_number)
     safe_case_num = re.sub(r"[^A-Za-z0-9_-]", "_", clean_case_num)
-    filename = f"{report_num}_{safe_case_num}.pdf"
+    filename = output_filename or f"{report_num}_{safe_case_num}.pdf"
     file_path = Path(settings.REPORTS_DIR) / filename
 
     # Filter evidence items
