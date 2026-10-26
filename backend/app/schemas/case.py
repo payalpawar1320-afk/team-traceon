@@ -64,6 +64,9 @@ class EvidenceBrief(BaseModel):
     file_size: int
     sha256_hash: str
     uploaded_at: datetime
+    is_duplicate: bool = False
+    duplicate_warning: Optional[str] = None
+    duplicate_of_evidence_number: Optional[str] = None
 
 
 class AuditEventBrief(BaseModel):

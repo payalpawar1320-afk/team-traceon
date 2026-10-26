@@ -450,6 +450,27 @@ export const EvidenceUploadPage: React.FC<EvidenceUploadPageProps> = ({
                 </button>
               </div>
             </div>
+            {uploadedEvidence.is_duplicate && (
+              <div
+                style={{
+                  marginTop: '10px',
+                  padding: '10px 12px',
+                  background: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  borderRadius: '4px',
+                  color: '#92400e',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <AlertTriangle size={15} color="#b45309" />
+                <span>
+                  <strong>Duplicate File Warning:</strong> {uploadedEvidence.duplicate_warning || 'Identical SHA-256 hash matches an existing evidence file. Both records are preserved in chain of custody.'}
+                </span>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -526,6 +547,11 @@ export const EvidenceUploadPage: React.FC<EvidenceUploadPageProps> = ({
                   <span className="badge badge-neutral" style={{ fontSize: '10px' }}>{item.detected_file_type.toUpperCase()}</span>
                   <span style={{ fontWeight: 600 }}>{item.evidence_number}</span>
                   <span style={{ color: '#64748b' }}>({item.original_filename})</span>
+                  {item.is_duplicate && (
+                    <span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontSize: '10px' }} title={item.duplicate_warning || 'Duplicate file'}>
+                      DUPLICATE FILE
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span className="mono" style={{ fontSize: '11px', color: '#475569' }}>

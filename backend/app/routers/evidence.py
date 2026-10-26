@@ -81,6 +81,44 @@ def get_latest_integrity_status(evidence_id: int, db: Session) -> str:
     return latest.result if latest else "Not checked"
 
 
+def check_duplicate_evidence(
+    db: Session,
+    sha256_hash: str,
+    case_id: Optional[int] = None,
+    exclude_evidence_id: Optional[int] = None,
+) -> tuple[bool, Optional[str], Optional[str]]:
+    """
+    Check whether another evidence record has an identical SHA-256 hash.
+    Prioritizes matching within the same case, then across cases.
+    Returns (is_duplicate, duplicate_warning, duplicate_of_evidence_number).
+    """
+    query = db.query(Evidence).filter(Evidence.sha256_hash == sha256_hash)
+    if exclude_evidence_id is not None:
+        query = query.filter(Evidence.id != exclude_evidence_id)
+
+    if case_id is not None:
+        same_case_dup = query.filter(Evidence.case_id == case_id).order_by(Evidence.uploaded_at.asc()).first()
+        if same_case_dup:
+            warning = (
+                f"Duplicate file warning: Identical SHA-256 hash ({sha256_hash[:16]}...) "
+                f"matches evidence {same_case_dup.evidence_number} ('{same_case_dup.original_filename}') in this case. "
+                "The same file was uploaded twice. Both evidence records are retained in chain of custody."
+            )
+            return True, warning, same_case_dup.evidence_number
+        return False, None, None
+
+    any_dup = query.order_by(Evidence.uploaded_at.asc()).first()
+    if any_dup:
+        warning = (
+            f"Duplicate file warning: Identical SHA-256 hash ({sha256_hash[:16]}...) "
+            f"matches evidence {any_dup.evidence_number} ('{any_dup.original_filename}'). "
+            "Both evidence records are retained in chain of custody."
+        )
+        return True, warning, any_dup.evidence_number
+
+    return False, None, None
+
+
 # --- Evidence Ingestion (Upload) ---
 
 
@@ -230,6 +268,14 @@ async def upload_evidence(
         f"for Case ID={case.id}. SHA-256={final_hash[:16]}..."
     )
 
+    is_dup, dup_warn, dup_of = check_duplicate_evidence(
+        db, final_hash, case_id=case.id, exclude_evidence_id=new_evidence.id
+    )
+    if is_dup:
+        logger.warning(
+            f"Duplicate file uploaded: Evidence {new_evidence.evidence_number} has matching SHA-256 hash with {dup_of}"
+        )
+
     return EvidenceResponse(
         id=new_evidence.id,
         case_id=new_evidence.case_id,
@@ -243,6 +289,9 @@ async def upload_evidence(
         uploaded_at=new_evidence.uploaded_at,
         metadata_json=new_evidence.metadata_json,
         latest_integrity_status="Match",
+        is_duplicate=is_dup,
+        duplicate_warning=dup_warn,
+        duplicate_of_evidence_number=dup_of,
     )
 
 
@@ -266,9 +315,27 @@ def list_case_evidence(case_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
+    hash_counts: dict = {}
+    for item in evidence_items:
+        hash_counts.setdefault(item.sha256_hash, []).append(item)
+
     results = []
     for item in evidence_items:
         latest_status = get_latest_integrity_status(item.id, db)
+        items_with_hash = hash_counts.get(item.sha256_hash, [])
+        is_dup = len(items_with_hash) > 1
+        dup_warn = None
+        dup_of = None
+        if is_dup:
+            other = next((o for o in items_with_hash if o.id != item.id), None)
+            if other:
+                dup_of = other.evidence_number
+                dup_warn = (
+                    f"Duplicate file warning: Identical SHA-256 hash ({item.sha256_hash[:16]}...) "
+                    f"matches evidence {other.evidence_number} ('{other.original_filename}'). "
+                    "File was uploaded twice. Both records are preserved in chain of custody."
+                )
+
         results.append(
             EvidenceResponse(
                 id=item.id,
@@ -283,6 +350,9 @@ def list_case_evidence(case_id: int, db: Session = Depends(get_db)):
                 uploaded_at=item.uploaded_at,
                 metadata_json=item.metadata_json,
                 latest_integrity_status=latest_status,
+                is_duplicate=is_dup,
+                duplicate_warning=dup_warn,
+                duplicate_of_evidence_number=dup_of,
             )
         )
     return results
@@ -324,6 +394,9 @@ def list_all_evidence(
     results = []
     for item in items:
         latest_status = get_latest_integrity_status(item.id, db)
+        is_dup, dup_warn, dup_of = check_duplicate_evidence(
+            db, item.sha256_hash, case_id=item.case_id, exclude_evidence_id=item.id
+        )
         results.append(
             EvidenceResponse(
                 id=item.id,
@@ -338,6 +411,9 @@ def list_all_evidence(
                 uploaded_at=item.uploaded_at,
                 metadata_json=item.metadata_json,
                 latest_integrity_status=latest_status,
+                is_duplicate=is_dup,
+                duplicate_warning=dup_warn,
+                duplicate_of_evidence_number=dup_of,
             )
         )
     return results
@@ -365,6 +441,10 @@ def get_evidence_detail(evidence_id: int, db: Session = Depends(get_db)):
     )
     latest_status = checks[0].result if checks else "Not checked"
 
+    is_dup, dup_warn, dup_of = check_duplicate_evidence(
+        db, item.sha256_hash, case_id=item.case_id, exclude_evidence_id=item.id
+    )
+
     return EvidenceDetailResponse(
         id=item.id,
         case_id=item.case_id,
@@ -380,6 +460,9 @@ def get_evidence_detail(evidence_id: int, db: Session = Depends(get_db)):
         uploaded_at=item.uploaded_at,
         metadata_json=item.metadata_json,
         latest_integrity_status=latest_status,
+        is_duplicate=is_dup,
+        duplicate_warning=dup_warn,
+        duplicate_of_evidence_number=dup_of,
         integrity_checks=checks,
     )
 

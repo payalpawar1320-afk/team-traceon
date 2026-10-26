@@ -181,6 +181,27 @@ export const EvidenceDetailPage: React.FC<EvidenceDetailPageProps> = ({
           <p className="page-subtitle" style={{ marginTop: '4px' }}>
             Original File: <strong>{evidence.original_filename}</strong> — Associated with Case {evidence.case_number} ({evidence.case_title})
           </p>
+          {evidence.is_duplicate && (
+            <div
+              style={{
+                marginTop: '10px',
+                padding: '10px 14px',
+                background: '#fffbeb',
+                border: '1px solid #fef3c7',
+                borderRadius: '4px',
+                color: '#92400e',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <AlertTriangle size={15} color="#d97706" />
+              <span>
+                <strong>Duplicate File Warning:</strong> {evidence.duplicate_warning || 'Identical SHA-256 hash matches another evidence file in this case. Both records are preserved in chain of custody.'}
+              </span>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: '8px' }}>

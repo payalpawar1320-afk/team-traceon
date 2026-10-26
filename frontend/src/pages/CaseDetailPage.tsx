@@ -327,6 +327,27 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({
           </div>
         ) : (
           <div className="table-container" style={{ border: 'none' }}>
+            {caseData.evidence_items.some((e) => e.is_duplicate) && (
+              <div
+                style={{
+                  marginBottom: '14px',
+                  padding: '10px 14px',
+                  background: '#fffbeb',
+                  border: '1px solid #fef3c7',
+                  borderRadius: '4px',
+                  color: '#92400e',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <AlertTriangle size={15} color="#d97706" />
+                <span>
+                  <strong>Duplicate Evidence Detected:</strong> Multiple records share identical SHA-256 cryptographic digests. Both files were preserved and retained in chain of custody.
+                </span>
+              </div>
+            )}
             <table className="data-table">
               <thead>
                 <tr>
@@ -341,7 +362,26 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({
               <tbody>
                 {caseData.evidence_items.map((ev) => (
                   <tr key={ev.id}>
-                    <td style={{ fontWeight: 600 }}>{ev.original_filename}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {ev.original_filename}
+                      {ev.is_duplicate && (
+                        <div style={{ marginTop: '2px' }}>
+                          <span
+                            className="badge"
+                            style={{
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              border: '1px solid #fde68a',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                            }}
+                            title={ev.duplicate_warning || 'Identical SHA-256 hash matches another evidence file in this case'}
+                          >
+                            ⚠️ Duplicate File
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <span className="badge badge-neutral">{ev.detected_file_type.toUpperCase()}</span>
                     </td>

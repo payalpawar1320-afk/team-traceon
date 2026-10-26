@@ -49,6 +49,9 @@ export interface EvidenceItem {
   uploaded_at: string;
   metadata_json?: string;
   latest_integrity_status?: string;
+  is_duplicate?: boolean;
+  duplicate_warning?: string | null;
+  duplicate_of_evidence_number?: string | null;
 }
 
 export interface IntegrityCheckRecord {

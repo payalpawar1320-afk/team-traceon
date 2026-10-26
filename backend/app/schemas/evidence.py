@@ -28,6 +28,9 @@ class EvidenceResponse(BaseModel):
     uploaded_at: datetime
     metadata_json: Optional[str] = None
     latest_integrity_status: Optional[str] = "Not checked"
+    is_duplicate: bool = False
+    duplicate_warning: Optional[str] = None
+    duplicate_of_evidence_number: Optional[str] = None
 
 
 class EvidenceDetailResponse(EvidenceResponse):

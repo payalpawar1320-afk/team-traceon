@@ -18,6 +18,7 @@ from app.schemas.case import (
     CaseResponse,
     CaseDetailResponse,
     CaseStatsResponse,
+    EvidenceBrief,
 )
 from app.schemas.cross_evidence import (
     CrossEvidenceCompareRequest,
@@ -193,6 +194,46 @@ def get_case_detail(case_identifier: str, db: Session = Depends(get_db)):
     # Sort audit events newest first
     recent_audits = sorted(case.audit_events, key=lambda a: a.created_at, reverse=True)[:50]
 
+    # Detect duplicate evidence files by SHA-256 hash
+    hash_seen: dict = {}
+    enriched_evidence = []
+    sorted_ev = sorted(case.evidence_items, key=lambda e: e.uploaded_at or datetime.min)
+    for ev in sorted_ev:
+        h = ev.sha256_hash
+        if h in hash_seen:
+            orig = hash_seen[h]
+            enriched_evidence.append(
+                EvidenceBrief(
+                    id=ev.id,
+                    original_filename=ev.original_filename,
+                    detected_file_type=ev.detected_file_type,
+                    file_size=ev.file_size,
+                    sha256_hash=ev.sha256_hash,
+                    uploaded_at=ev.uploaded_at,
+                    is_duplicate=True,
+                    duplicate_warning=(
+                        f"Duplicate File Warning: Exact byte match (SHA-256: {h[:16]}...) "
+                        f"with {orig.evidence_number} ('{orig.original_filename}'). File was uploaded twice."
+                    ),
+                    duplicate_of_evidence_number=orig.evidence_number,
+                )
+            )
+        else:
+            hash_seen[h] = ev
+            enriched_evidence.append(
+                EvidenceBrief(
+                    id=ev.id,
+                    original_filename=ev.original_filename,
+                    detected_file_type=ev.detected_file_type,
+                    file_size=ev.file_size,
+                    sha256_hash=ev.sha256_hash,
+                    uploaded_at=ev.uploaded_at,
+                    is_duplicate=False,
+                    duplicate_warning=None,
+                    duplicate_of_evidence_number=None,
+                )
+            )
+
     return CaseDetailResponse(
         id=case.id,
         case_number=case.case_number,
@@ -204,7 +245,7 @@ def get_case_detail(case_identifier: str, db: Session = Depends(get_db)):
         updated_at=case.updated_at,
         evidence_count=ev_count,
         analysis_count=an_count,
-        evidence_items=case.evidence_items,
+        evidence_items=enriched_evidence,
         audit_events=recent_audits,
     )
 

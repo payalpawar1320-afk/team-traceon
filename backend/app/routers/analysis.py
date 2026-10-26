@@ -447,6 +447,7 @@ def get_evidence_analyses(evidence_id: int, db: Session = Depends(get_db)):
                         status=rec.status,
                         metadata_report=ImageMetadataReport(**payload.get("metadata_report", {})),
                         ela_report=ELAReport(**payload.get("ela_report", {})),
+                        ai_detection_report=payload.get("ai_detection_report"),
                         total_indicators=payload.get("total_indicators", 0),
                         limitations=rec.limitations or "",
                         created_at=rec.created_at,
