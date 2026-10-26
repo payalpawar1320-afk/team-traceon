@@ -61,7 +61,7 @@ export const App: React.FC = () => {
         return <DashboardPage health={health} onNavigate={handleNavigate} />;
 
       case 'create-case':
-        return <CreateCasePage onNavigate={handleNavigate} />;
+        return <CreateCasePage onNavigate={handleNavigate} health={health} />;
 
       case 'my-cases':
         return <MyCasesPage onNavigate={handleNavigate} />;

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import type { PageId } from '../types';
+import type { PageId, HealthResponse } from '../types';
 import { createCase } from '../api/client';
-import { FolderPlus, ArrowLeft, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { FolderPlus, ArrowLeft, ShieldAlert, CheckCircle2, Sparkles, AlertCircle, ServerCrash } from 'lucide-react';
 
 interface CreateCasePageProps {
   onNavigate: (page: PageId, caseIdentifier?: string | number) => void;
+  health?: HealthResponse | null;
 }
 
-export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) => {
+export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate, health }) => {
   const [caseNumber, setCaseNumber] = useState('');
   const [title, setTitle] = useState('');
   const [investigatorName, setInvestigatorName] = useState('Lead Investigator');
@@ -17,18 +18,48 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ title?: string; investigatorName?: string }>({});
+
+  const isBackendOffline = health !== undefined && health === null;
+
+  const handlePreFillSample = () => {
+    setError(null);
+    setFieldErrors({});
+    setTitle('Unauthorized Infiltration & Cloud Extortion Inquiry');
+    setInvestigatorName('Inspector R. Sharma');
+    setDescription(
+      'Investigation into unauthorized credential abuse, exfiltration of financial records, and ransom demands. Seized digital exhibits include server backup archives and suspect smartphone recordings.'
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
 
-    if (title.trim().length < 3) {
-      setError('Case title must be at least 3 characters in length.');
+    const newFieldErrors: { title?: string; investigatorName?: string } = {};
+
+    if (!title.trim()) {
+      newFieldErrors.title = 'Case Title is required.';
+    } else if (title.trim().length < 3) {
+      newFieldErrors.title = 'Case Title must be at least 3 characters in length.';
+    }
+
+    if (!investigatorName.trim()) {
+      newFieldErrors.investigatorName = 'Investigating Officer name is required.';
+    } else if (investigatorName.trim().length < 2) {
+      newFieldErrors.investigatorName = 'Investigating Officer name must be at least 2 characters.';
+    }
+
+    if (Object.keys(newFieldErrors).length > 0) {
+      setFieldErrors(newFieldErrors);
+      setError('Please resolve the required field errors highlighted below.');
       return;
     }
 
+    setFieldErrors({});
     setLoading(true);
+
     try {
       const created = await createCase({
         case_number: caseNumber.trim() || undefined,
@@ -43,7 +74,20 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
         onNavigate('case-details', created.id);
       }, 1200);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to register investigation case.');
+      let errMsg = err instanceof Error ? err.message : 'Failed to register investigation case.';
+      if (
+        errMsg.toLowerCase().includes('failed to fetch') ||
+        errMsg.toLowerCase().includes('networkerror') ||
+        errMsg.toLowerCase().includes('econnrefused') ||
+        errMsg.includes('500') ||
+        errMsg.includes('504')
+      ) {
+        errMsg =
+          'Backend server is offline or unreachable. Please start the backend service (run: `backend\\venv\\Scripts\\uvicorn app.main:app --app-dir backend --port 8000`) or verify network connection.';
+      }
+      setError(errMsg);
+      // Scroll smoothly to ensure user sees the feedback
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setLoading(false);
     }
@@ -58,14 +102,55 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
             Create an official digital evidence case container with unique identification and audit log tracking.
           </p>
         </div>
-        <button
-          className="btn btn-secondary"
-          onClick={() => onNavigate('my-cases')}
-          type="button"
-        >
-          <ArrowLeft size={15} /> Back to Cases
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={handlePreFillSample}
+            type="button"
+            title="Automatically populate sample police investigation data"
+            style={{ fontSize: '12px' }}
+          >
+            <Sparkles size={14} color="#6366f1" /> Pre-fill Sample
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => onNavigate('my-cases')}
+            type="button"
+            style={{ fontSize: '12px' }}
+          >
+            <ArrowLeft size={14} /> Back to Cases
+          </button>
+        </div>
       </div>
+
+      {isBackendOffline && (
+        <div
+          className="alert-banner alert-warning"
+          style={{
+            background: '#fffbeb',
+            borderColor: '#f59e0b',
+            color: '#b45309',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            padding: '12px 16px',
+            borderRadius: '6px',
+          }}
+        >
+          <ServerCrash size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div>
+            <strong>Backend API is Offline:</strong> The web app is currently unable to communicate with the FastAPI backend on port 8000.
+            <div style={{ fontSize: '12px', marginTop: '4px', color: '#78350f' }}>
+              To enable case registration and evidence ingestion, start the local backend server:
+              <br />
+              <code style={{ background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>
+                backend\venv\Scripts\uvicorn.exe app.main:app --app-dir backend --reload --port 8000
+              </code>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="notice-box notice-info" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
         <span className="badge badge-primary" style={{ padding: '3px 8px', fontSize: '11px', fontWeight: 700 }}>STEP 1 OF 5</span>
@@ -75,15 +160,15 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
       </div>
 
       {error && (
-        <div className="alert-banner alert-error">
-          <ShieldAlert size={18} />
+        <div className="alert-banner alert-error" style={{ marginBottom: '16px' }}>
+          <ShieldAlert size={18} style={{ flexShrink: 0 }} />
           <div>{error}</div>
         </div>
       )}
 
       {successMsg && (
-        <div className="alert-banner alert-success">
-          <CheckCircle2 size={18} />
+        <div className="alert-banner alert-success" style={{ marginBottom: '16px' }}>
+          <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
           <div>{successMsg}</div>
         </div>
       )}
@@ -96,7 +181,7 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
           </span>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label" htmlFor="caseNumber">
@@ -123,14 +208,24 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
               <input
                 id="investigatorName"
                 type="text"
-                className="form-input"
+                className={`form-input ${fieldErrors.investigatorName ? 'input-error' : ''}`}
                 placeholder="e.g. Inspector R. Sharma"
                 value={investigatorName}
-                onChange={(e) => setInvestigatorName(e.target.value)}
-                required
+                onChange={(e) => {
+                  setInvestigatorName(e.target.value);
+                  if (fieldErrors.investigatorName) {
+                    setFieldErrors((prev) => ({ ...prev, investigatorName: undefined }));
+                  }
+                }}
                 disabled={loading}
               />
-              <p className="form-hint">Authorised investigator maintaining chain-of-custody.</p>
+              {fieldErrors.investigatorName ? (
+                <p className="form-hint" style={{ color: '#dc2626', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <AlertCircle size={12} /> {fieldErrors.investigatorName}
+                </p>
+              ) : (
+                <p className="form-hint">Authorised investigator maintaining chain-of-custody.</p>
+              )}
             </div>
           </div>
 
@@ -141,14 +236,24 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
             <input
               id="caseTitle"
               type="text"
-              className="form-input"
+              className={`form-input ${fieldErrors.title ? 'input-error' : ''}`}
               placeholder="e.g. Unauthorized Cloud Server Infiltration & Digital Extortion"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (fieldErrors.title) {
+                  setFieldErrors((prev) => ({ ...prev, title: undefined }));
+                }
+              }}
               disabled={loading}
             />
-            <p className="form-hint">A concise, descriptive summary of the incident under forensic inquiry.</p>
+            {fieldErrors.title ? (
+              <p className="form-hint" style={{ color: '#dc2626', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <AlertCircle size={12} /> {fieldErrors.title}
+              </p>
+            ) : (
+              <p className="form-hint">A concise, descriptive summary of the incident under forensic inquiry (min 3 chars).</p>
+            )}
           </div>
 
           <div className="form-grid-2">
@@ -191,6 +296,16 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
             </div>
           </div>
 
+          {error && (
+            <div
+              className="alert-banner alert-error"
+              style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              <ShieldAlert size={16} style={{ flexShrink: 0 }} />
+              <div style={{ fontSize: '13px' }}>{error}</div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
             <button
               type="button"
@@ -201,12 +316,13 @@ export const CreateCasePage: React.FC<CreateCasePageProps> = ({ onNavigate }) =>
               Cancel
             </button>
             <button
+              id="submit-create-case-btn"
               type="submit"
               className="btn btn-primary"
               disabled={loading}
             >
               <FolderPlus size={16} />
-              {loading ? 'Registering Case...' : 'Register Case File'}
+              {loading ? 'Registering Case...' : 'Register Case'}
             </button>
           </div>
         </form>
